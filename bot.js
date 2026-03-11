@@ -1,0 +1,289 @@
+const TelegramBot = require("node-telegram-bot-api");
+const Anthropic = require("@anthropic-ai/sdk");
+const { createClient } = require("@supabase/supabase-js");
+
+// ── CONFIGURACIÓN ──────────────────────────────────────────────────────────
+const TELEGRAM_TOKEN = "8006973112:AAF_-YIJD5mE-9HORbI7eWFab96bQk1zsR8";
+const ANTHROPIC_KEY  = "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";
+const SUPABASE_URL   = "https://rciwveeaxydullpcwvmu.supabase.co";
+const SUPABASE_KEY   = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJjaXd2ZWVheHlkdWxscGN3dm11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNTQzMDksImV4cCI6MjA4ODgzMDMwOX0.666zyqQ-Ps9j9DHVT1fuL58O-dfBAgJLWGcp6DGeAsA";
+
+// ID del grupo familiar — se llena automático cuando el bot recibe el primer mensaje del grupo
+let GROUP_CHAT_ID = null;
+
+// ── INICIALIZAR ────────────────────────────────────────────────────────────
+const bot      = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+const claude   = new Anthropic({ apiKey: ANTHROPIC_KEY });
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ── CATEGORÍAS ─────────────────────────────────────────────────────────────
+const CATS = {
+  vivienda:       { emoji: "🏠", label: "Vivienda",        budget: 2693000 },
+  mercado:        { emoji: "🛒", label: "Mercado/Aseo",    budget: 1900000 },
+  familia:        { emoji: "👨‍👩‍👧", label: "Familia",         budget: 2071000 },
+  transporte:     { emoji: "⛽", label: "Transporte",      budget: 450000  },
+  servicios:      { emoji: "💡", label: "Servicios",       budget: 395000  },
+  celulares:      { emoji: "📱", label: "Celulares",       budget: 80000   },
+  ocio:           { emoji: "🎮", label: "Ocio",            budget: 500000  },
+  personalJ:      { emoji: "👤", label: "Personal Andres", budget: 400000  },
+  personalD:      { emoji: "👤", label: "Personal Dani",   budget: 400000  },
+  deudas:         { emoji: "💳", label: "Deudas",          budget: 470000  },
+  fondoCarro:     { emoji: "🚗", label: "Fondo Carro",     budget: 500000  },
+  fondoImpuestos: { emoji: "🏛️", label: "Fondo Impuestos", budget: 500000  },
+  otros:          { emoji: "📦", label: "Otros",           budget: 0       },
+};
+
+const INGRESOS_MENSUALES = 13848000;
+const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+const fmt = (n) =>
+  new Intl.NumberFormat("es-CO", {
+    style: "currency", currency: "COP", minimumFractionDigits: 0,
+  }).format(n);
+
+const bar = (pct) => {
+  const f = Math.min(Math.round(pct / 10), 10);
+  return "▓".repeat(f) + "░".repeat(10 - f) + ` ${Math.round(pct)}%`;
+};
+
+// ── ESTADO TEMPORAL (gastos pendientes de confirmar) ───────────────────────
+const pendientes = {};
+
+// ── GUARDAR GASTO EN SUPABASE ───────────────────────────────────────────────
+async function guardarGasto(chatId, gasto, who) {
+  const cat = CATS[gasto.category] || CATS["otros"];
+
+  // Guardar en Supabase con la fecha exacta del momento del gasto
+  await supabase.from("gastos").insert({
+    monto:       gasto.amount,
+    categoria:   gasto.category,
+    descripcion: gasto.description,
+    quien:       who,
+    fuente:      gasto.source,
+    fecha:       gasto.fecha, // fecha real del gasto
+  });
+
+  // Calcular progreso del mes del gasto
+  const fechaInicio = gasto.fecha.slice(0, 7) + "-01"; // primer día del mes del gasto
+
+  const { data } = await supabase
+    .from("gastos")
+    .select("monto")
+    .eq("categoria", gasto.category)
+    .gte("fecha", fechaInicio)
+    .lte("fecha", gasto.fecha.slice(0, 7) + "-31");
+
+  const totalMes = (data || []).reduce((s, r) => s + r.monto, 0);
+  const pct      = cat.budget > 0 ? (totalMes / cat.budget) * 100 : 0;
+  const status   = pct > 100 ? "⚠️ EXCEDIDO"
+                 : pct > 80  ? "⚡ Cuidado"
+                 : "✅";
+
+  const origen = gasto.source === "applepay" ? `${who} (Apple Pay 💳)` : who;
+  const mesNombre = MESES[parseInt(gasto.fecha.slice(5, 7)) - 1];
+
+  let mensaje = `✅ *${origen}* · ${cat.emoji} ${cat.label}\n`;
+  mensaje += `*${fmt(gasto.amount)}* registrado\n`;
+  mensaje += `📝 ${gasto.description}\n`;
+  mensaje += `📅 ${mesNombre} ${gasto.fecha.slice(0, 4)}\n\n`;
+
+  if (cat.budget > 0) {
+    mensaje += `${status} ${cat.label} ${mesNombre}:\n`;
+    mensaje += `${fmt(totalMes)} de ${fmt(cat.budget)}\n`;
+    mensaje += `${bar(pct)}`;
+  }
+
+  await bot.sendMessage(chatId, mensaje, { parse_mode: "Markdown" });
+}
+
+// ── RESUMEN MENSUAL ─────────────────────────────────────────────────────────
+async function enviarResumenMensual(chatId, anio, mes) {
+  const mesStr    = String(mes).padStart(2, "0");
+  const fechaIni  = `${anio}-${mesStr}-01`;
+  const fechaFin  = `${anio}-${mesStr}-31`;
+  const mesNombre = MESES[mes - 1];
+
+  const { data } = await supabase
+    .from("gastos")
+    .select("monto, categoria")
+    .gte("fecha", fechaIni)
+    .lte("fecha", fechaFin);
+
+  if (!data || data.length === 0) return;
+
+  // Agrupar por categoría
+  const totalesCat = {};
+  data.forEach(g => {
+    totalesCat[g.categoria] = (totalesCat[g.categoria] || 0) + g.monto;
+  });
+
+  const totalGastado = data.reduce((s, g) => s + g.monto, 0);
+  const ahorro       = INGRESOS_MENSUALES - totalGastado;
+
+  let msg = `📊 *Resumen ${mesNombre} ${anio}*\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  Object.entries(CATS).forEach(([id, cat]) => {
+    const gastado = totalesCat[id] || 0;
+    if (gastado === 0 && cat.budget === 0) return;
+    const pct    = cat.budget > 0 ? Math.round((gastado / cat.budget) * 100) : 0;
+    const icono  = pct > 100 ? "⚠️" : pct > 80 ? "⚡" : "✅";
+    const linea  = cat.budget > 0
+      ? `${icono} ${cat.emoji} ${cat.label}: ${fmt(gastado)} de ${fmt(cat.budget)} · ${pct}%`
+      : `📦 ${cat.emoji} ${cat.label}: ${fmt(gastado)}`;
+    msg += linea + "\n";
+  });
+
+  msg += `\n━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `💰 *Ingresos:* ${fmt(INGRESOS_MENSUALES)}\n`;
+  msg += `💸 *Gastado:* ${fmt(totalGastado)}\n`;
+  msg += ahorro >= 0
+    ? `💚 *Ahorro del mes:* ${fmt(ahorro)} 🎉`
+    : `🔴 *Déficit del mes:* ${fmt(Math.abs(ahorro))} ⚠️`;
+
+  await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+}
+
+// ── VERIFICAR FIN DE MES (corre cada hora) ─────────────────────────────────
+function verificarFinDeMes() {
+  setInterval(async () => {
+    if (!GROUP_CHAT_ID) return;
+
+    const ahora    = new Date();
+    const maniana  = new Date(ahora);
+    maniana.setDate(ahora.getDate() + 1);
+
+    // Si mañana es día 1 → hoy es el último día del mes → enviar resumen
+    if (maniana.getDate() === 1 && ahora.getHours() === 20) {
+      const mes  = ahora.getMonth() + 1;
+      const anio = ahora.getFullYear();
+      await enviarResumenMensual(GROUP_CHAT_ID, anio, mes);
+    }
+  }, 60 * 60 * 1000); // cada hora
+}
+
+// ── ESCUCHAR MENSAJES ───────────────────────────────────────────────────────
+bot.on("message", async (msg) => {
+  const text   = (msg.text || "").trim();
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const who    = msg.from.first_name || "Alguien";
+
+  // Guardar el chat ID del grupo automáticamente
+  if (msg.chat.type === "group" || msg.chat.type === "supergroup") {
+    GROUP_CHAT_ID = chatId;
+  }
+
+  if (!text || text.startsWith("/")) {
+    // Comando /resumen → enviar resumen del mes actual
+    if (text === "/resumen") {
+      const ahora = new Date();
+      await enviarResumenMensual(chatId, ahora.getFullYear(), ahora.getMonth() + 1);
+    }
+    return;
+  }
+
+  // ── Si hay un gasto pendiente de confirmar para este usuario ──────────────
+  if (pendientes[userId]) {
+    const gasto   = pendientes[userId];
+    const catKeys = Object.keys(CATS);
+    const num     = parseInt(text);
+
+    // Confirmó con ✅ o "si"
+    if (text === "✅" || text.toLowerCase() === "si" || text.toLowerCase() === "sí") {
+      delete pendientes[userId];
+      await guardarGasto(chatId, gasto, who);
+      return;
+    }
+
+    // Eligió una categoría por número
+    if (!isNaN(num) && num >= 1 && num <= catKeys.length) {
+      gasto.category = catKeys[num - 1];
+      delete pendientes[userId];
+      await guardarGasto(chatId, gasto, who);
+      return;
+    }
+
+    await bot.sendMessage(chatId,
+      "Responde con ✅ para confirmar o escribe el número de la categoría correcta 👆",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+
+  // ── Procesar nuevo gasto ──────────────────────────────────────────────────
+  const isApplePay = text.startsWith("💳 Apple Pay");
+  const source     = isApplePay ? "applepay" : "telegram";
+  const fechaHoy   = new Date().toISOString().split("T")[0];
+
+  try {
+    const catList = Object.entries(CATS)
+      .map(([id, c], i) => `${i + 1}. ${c.emoji} ${c.label}`)
+      .join(", ");
+
+    const ai = await claude.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 200,
+      messages: [{
+        role: "user",
+        content: `Eres un asistente de gastos familiares colombiano.
+Extrae del mensaje:
+1. Monto en pesos (soporta "45mil", "45.000", "$45000", "cuarenta y cinco mil")
+2. La categoría MÁS apropiada de esta lista: ${catList}
+3. Descripción corta y específica del gasto (máximo 40 caracteres)
+
+Responde SOLO con JSON sin markdown:
+{"amount": número, "category": "id_categoria", "description": "descripción"}
+
+Los IDs de categoría son exactamente: ${Object.keys(CATS).join(", ")}
+
+Mensaje: "${text}"`,
+      }],
+    });
+
+    const rawText    = ai.content[0].text.trim().replace(/```json|```/g, "").trim();
+    const resultado  = JSON.parse(rawText);
+    const categoryId = Object.keys(CATS).includes(resultado.category) ? resultado.category : "otros";
+    const cat        = CATS[categoryId];
+
+    // Guardar gasto pendiente
+    pendientes[userId] = {
+      amount:      resultado.amount,
+      category:    categoryId,
+      description: resultado.description,
+      source,
+      fecha: fechaHoy,
+    };
+
+    // Construir lista de categorías para botones
+    const listaCats = Object.entries(CATS)
+      .map(([, c], i) => `${i + 1}. ${c.emoji} ${c.label}`)
+      .join("\n");
+
+    // Pedir confirmación
+    const confirmMsg =
+      `🤖 Detecté este gasto:\n\n` +
+      `${cat.emoji} *${cat.label}*\n` +
+      `💵 *${fmt(resultado.amount)}*\n` +
+      `📝 ${resultado.description}\n\n` +
+      `¿Es correcta la categoría?\n` +
+      `Responde *✅* para confirmar o el *número* para cambiarla:\n\n` +
+      `${listaCats}`;
+
+    await bot.sendMessage(chatId, confirmMsg, { parse_mode: "Markdown" });
+
+  } catch (err) {
+    console.error("Error:", err.message);
+    delete pendientes[userId];
+    await bot.sendMessage(chatId,
+      "No entendí ese gasto 😅\nIntenta con: _\"45mil mercado\"_ o _\"Taxi 12000\"_",
+      { parse_mode: "Markdown" }
+    );
+  }
+});
+
+// ── ARRANCAR ───────────────────────────────────────────────────────────────
+verificarFinDeMes();
+console.log("🤖 GastosBot corriendo...");
+console.log("📅 Resumen automático activado — se envía el último día del mes a las 8pm");
+console.log("📊 Escribe /resumen en el grupo para ver el resumen en cualquier momento");
