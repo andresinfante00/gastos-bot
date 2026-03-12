@@ -75,22 +75,29 @@ async function guardarGasto(chatId, gasto, who) {
 
   const totalMes = (data || []).reduce((s, r) => s + r.monto, 0);
   const pct      = cat.budget > 0 ? (totalMes / cat.budget) * 100 : 0;
-  const status   = pct > 100 ? "⚠️ EXCEDIDO"
-                 : pct > 80  ? "⚡ Cuidado"
-                 : "✅";
-
-  const origen = gasto.source === "applepay" ? `${who} (Apple Pay 💳)` : who;
+  const status    = pct > 100 ? "⚠️ EXCEDIDO"
+                  : pct > 80  ? "⚡ Cuidado"
+                  : "✅";
+  const origen    = gasto.source === "applepay" ? `${who} (Apple Pay 💳)` : who;
   const mesNombre = MESES[parseInt(gasto.fecha.slice(5, 7)) - 1];
+  const restante  = cat.budget - totalMes;
 
-  let mensaje = `✅ *${origen}* · ${cat.emoji} ${cat.label}\n`;
+  let mensaje = `${status} *${origen}* · ${cat.emoji} ${cat.label}\n`;
   mensaje += `*${fmt(gasto.amount)}* registrado\n`;
   mensaje += `📝 ${gasto.description}\n`;
   mensaje += `📅 ${mesNombre} ${gasto.fecha.slice(0, 4)}\n\n`;
 
   if (cat.budget > 0) {
-    mensaje += `${status} ${cat.label} ${mesNombre}:\n`;
-    mensaje += `${fmt(totalMes)} de ${fmt(cat.budget)}\n`;
+    mensaje += `💰 Gastado este mes: *${fmt(totalMes)}*\n`;
+    mensaje += `🎯 Presupuesto:      *${fmt(cat.budget)}*\n`;
+    if (restante >= 0) {
+      mensaje += `✅ Te quedan:        *${fmt(restante)}*\n`;
+    } else {
+      mensaje += `⚠️ Te pasaste:       *${fmt(Math.abs(restante))}*\n`;
+    }
     mensaje += `${bar(pct)}`;
+  } else {
+    mensaje += `📦 Gasto registrado en Otros`;
   }
 
   await bot.sendMessage(chatId, mensaje, { parse_mode: "Markdown" });
@@ -280,6 +287,16 @@ Mensaje: "${text}"`,
       { parse_mode: "Markdown" }
     );
   }
+});
+
+// ── SERVIDOR HTTP (requerido por Render) ───────────────────────────────────
+const http = require("http");
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("GastosBot corriendo OK");
+}).listen(PORT, () => {
+  console.log("🌐 Servidor HTTP escuchando en puerto " + PORT);
 });
 
 // ── ARRANCAR ───────────────────────────────────────────────────────────────
