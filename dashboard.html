@@ -440,6 +440,21 @@ function cambiarMes(delta) {
 // ── INICIAR ─────────────────────────────────────────────────────────────────
 renderMes();
 renderChartMeses();
+
+// Auto-refresh cada 30 segundos
+setInterval(() => {
+  renderMes();
+  renderChartMeses();
+}, 30 * 1000);
+
+// Indicador visual de última actualización
+function actualizarHora() {
+  const el = document.querySelector("footer");
+  const hora = new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  el.textContent = `Última actualización: ${hora} · Actualiza cada 30 seg · Gastos Familia 2026`;
+}
+actualizarHora();
+setInterval(actualizarHora, 1000);
 </script>
 </body>
 </html>
