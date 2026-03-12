@@ -184,14 +184,17 @@ bot.on("message", async (msg) => {
 
   if (!text || text.startsWith("/")) {
 
+    // Normalizar comandos en grupos (llegan como /comando@NombreBot)
+    const cmd = text.split("@")[0].toLowerCase();
+
     // /resumen → resumen del mes actual
-    if (text === "/resumen") {
+    if (cmd === "/resumen") {
       const ahora = new Date();
       await enviarResumenMensual(chatId, ahora.getFullYear(), ahora.getMonth() + 1);
     }
 
     // /ultimos → últimos 5 gastos
-    if (text === "/ultimos") {
+    if (cmd === "/ultimos") {
       const { data } = await supabase
         .from("gastos")
         .select("id, monto, categoria, descripcion, quien, fecha")
@@ -215,8 +218,8 @@ bot.on("message", async (msg) => {
     }
 
     // /borrar ID → borrar un gasto
-    if (text.startsWith("/borrar")) {
-      const id = text.split(" ")[1];
+    if (cmd.startsWith("/borrar")) {
+      const id = text.split(" ")[1] || text.split("@")[0].split(" ")[1];
       if (!id) {
         await bot.sendMessage(chatId, "Indica el ID del gasto. Ejemplo: /borrar 42\nUsa /ultimos para ver los IDs.");
         return;
@@ -230,7 +233,7 @@ bot.on("message", async (msg) => {
     }
 
     // /editar ID → editar monto o categoría
-    if (text.startsWith("/editar")) {
+    if (cmd.startsWith("/editar")) {
       const id = text.split(" ")[1];
       if (!id) {
         await bot.sendMessage(chatId, "Indica el ID del gasto. Ejemplo: /editar 42\nUsa /ultimos para ver los IDs.");
