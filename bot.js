@@ -420,15 +420,27 @@ Mensaje: "${text}"`,
   }
 });
 
-// ── SERVIDOR HTTP (requerido por Render) ───────────────────────────────────
-const http = require("http");
-const PORT = process.env.PORT || 3000;
+// ── SERVIDOR HTTP + AUTO-PING (evita que Render duerma el bot) ────────────
+const http  = require("http");
+const https = require("https");
+const PORT  = process.env.PORT || 3000;
+
 http.createServer((req, res) => {
   res.writeHead(200);
   res.end("GastosBot corriendo OK");
 }).listen(PORT, () => {
   console.log("🌐 Servidor HTTP escuchando en puerto " + PORT);
 });
+
+// Auto-ping cada 10 minutos para mantener el bot despierto en Render
+const BOT_URL = process.env.RENDER_EXTERNAL_URL || "https://gastos-bot-csuv.onrender.com";
+setInterval(() => {
+  https.get(BOT_URL, (res) => {
+    console.log(`🏓 Auto-ping OK — ${new Date().toLocaleTimeString("es-CO")}`);
+  }).on("error", (err) => {
+    console.log("⚠️ Auto-ping error:", err.message);
+  });
+}, 3 * 60 * 1000); // cada 3 minutos
 
 // ── ARRANCAR ───────────────────────────────────────────────────────────────
 verificarFinDeMes();
