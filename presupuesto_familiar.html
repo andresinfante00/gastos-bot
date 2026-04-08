@@ -132,7 +132,8 @@ select option{background:var(--s2)}
     <div class="hbtns">
       <span style="font-size:11px;color:var(--t3)" id="lu">Cargando...</span>
       <button class="rbtn" onclick="load()">&#8635; Actualizar</button>
-      <button class="rbtn primary" onclick="abrirModal()">+ Registrar gastos</button>
+      <button class="rbtn primary" onclick="abrirModal()">+ Gastos</button>
+      <button class="rbtn" style="background:#00695C;color:#fff;border-color:#00695C" onclick="abrirModalIngresos()">+ Ingresos</button>
     </div>
     <div class="tabs" id="tabs"></div>
   </div>
@@ -185,9 +186,12 @@ select option{background:var(--s2)}
       </div>
     </div>
     <div class="mp">
-      <div class="ph"><span class="dot" style="background:var(--tl)"></span>Ingresos mensuales</div>
+      <div class="ph"><span class="dot" style="background:var(--tl)"></span>Ingresos mensuales<span style="margin-left:auto;font-size:10px;color:var(--tl);cursor:pointer" onclick="abrirModalIngresos()">+ registrar</span></div>
       <div id="ir"></div>
-      <div class="mf"><span>Total ingresos</span><span id="it" style="color:var(--tl)">&#8212;</span></div>
+      <div class="mf" style="flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--t2)">Esperado</span><span id="it-esp" style="color:var(--t2)">&#8212;</span></div>
+        <div style="display:flex;justify-content:space-between"><span>Real recibido</span><span id="it" style="color:var(--tl);font-size:14px">&#8212;</span></div>
+      </div>
     </div>
     <div class="mp">
       <div class="ph"><span class="dot" style="background:var(--rd)"></span>Deudas vigentes</div>
@@ -202,6 +206,23 @@ select option{background:var(--s2)}
   </div>
 </div>
 <p style="text-align:center;color:var(--t3);font-size:11px;margin-top:24px;padding-bottom:8px">Andr&#233;s &amp; Daniela &middot; Datos en tiempo real desde Supabase &middot; Bot Telegram activo</p>
+</div>
+
+<!-- MODAL INGRESOS -->
+<div class="overlay" id="overlay-ing">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="mhdr"><h2>&#x1F4B5; Registrar ingresos</h2><button class="xbtn" onclick="cerrarModalIngresos()">&#x2715;</button></div>
+    <div class="mbody">
+      <div style="margin-bottom:14px;font-size:12px;color:var(--t2)">Registra los ingresos recibidos este mes. Los quincenales se registran dos veces.</div>
+      <div class="gq" id="gq-ing" style="max-height:400px"></div>
+      <div class="pb" id="pb-ing"><div class="pf" id="pf-ing"></div></div>
+      <div class="smsg" id="smsg-ing"></div>
+      <div class="fact">
+        <button class="rbtn" onclick="cerrarModalIngresos()">Cancelar</button>
+        <button class="sbtn" id="sbtn-ing" onclick="guardarIngresos()" style="background:#00695C">Guardar ingresos</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="overlay" id="overlay">
@@ -399,8 +420,7 @@ function render(rows){
   }).join('')||'<tr><td colspan="6" class="empty">Sin gastos este mes</td></tr>';
   $('rl').style.display='none';$('rt').style.display='table';
 
-  $('ir').innerHTML=ING.map(function(ig){return'<div class="mr"><span class="ml">'+ig.f+'</span><span class="mv" style="color:var(--tl)">'+fmt(ig.e)+'</span></div>';}).join('');
-  $('it').textContent=fmt(INGRESOS_TOTAL);
+  renderIngresos(rows);
   $('dr').innerHTML=DEU.map(function(d){return'<div class="mr"><span class="ml">'+d.n+'<span class="pill pr" style="margin-left:6px">deuda</span></span><span class="mv" style="color:var(--am)">'+fmt(d.s)+'</span></div>';}).join('');
   $('dt').textContent=fmt(DEU.reduce(function(a,d){return a+d.s;},0));
   renderAhorro();
@@ -504,6 +524,117 @@ async function guardarTodos(){
 }
 
 function setSmsg(msg,tipo){var el=$('smsg');el.textContent=msg;el.className='smsg'+(tipo?' '+tipo:'');}
+
+// ── INGRESOS REALES ────────────────────────────────────────────────────────
+var ING_FUENTES=[
+  {id:'salario_andres', f:'Salario Andres',  e:3780000, frec:'quincenal', quien:'Andres'},
+  {id:'salario_andres', f:'Salario Andres',  e:3780000, frec:'quincenal', quien:'Andres'},
+  {id:'salario_daniela',f:'Salario Daniela', e:1900000, frec:'quincenal', quien:'Daniela'},
+  {id:'salario_daniela',f:'Salario Daniela', e:1900000, frec:'quincenal', quien:'Daniela'},
+  {id:'arriendo_casa',  f:'Arriendo Casa',   e:1132000, frec:'mensual',   quien:'Andres'},
+  {id:'arriendo_apto',  f:'Arriendo Apto',   e:1156000, frec:'mensual',   quien:'Andres'},
+];
+
+async function renderIngresos(gastoRows){
+  // Fetch real income for selected month
+  var start=new Date(curY,curM,1).toISOString().split('T')[0];
+  var end=new Date(curY,curM+1,0).toISOString().split('T')[0];
+  var result=await db.from('ingresos').select('id,fuente,monto,fecha,quien,frecuencia').gte('fecha',start).lte('fecha',end+'T23:59:59');
+  var ingReales=result.data||[];
+  var totReal=ingReales.reduce(function(a,r){return a+(parseFloat(r.monto)||0);},0);
+  var totEsp=INGRESOS_TOTAL;
+
+  $('ir').innerHTML=ING.map(function(ig){
+    var real=ingReales.filter(function(r){return r.fuente===ig.f;}).reduce(function(a,r){return a+(parseFloat(r.monto)||0);},0);
+    var color=real>=ig.e?'var(--gr)':real>0?'var(--am)':'var(--t2)';
+    return'<div class="mr"><span class="ml" style="flex-direction:column;align-items:flex-start;gap:1px">'+
+      '<span>'+ig.f+'</span>'+
+      '<span style="font-size:10px;color:var(--t3)">'+ig.frec+'</span></span>'+
+      '<span><span style="font-size:11px;color:var(--t3);margin-right:6px">esp: '+fmt(ig.e)+'</span>'+
+      '<span class="mv" style="color:'+color+'">'+( real>0?fmt(real):'pendiente')+'</span></span></div>';
+  }).join('');
+  $('it-esp').textContent=fmt(totEsp);
+  $('it').textContent=totReal>0?fmt(totReal):'$ 0';
+}
+
+function abrirModalIngresos(){
+  $('overlay-ing').classList.add('open');
+  $('smsg-ing').textContent='';$('smsg-ing').className='smsg';
+  $('pb-ing').style.display='none';
+  $('sbtn-ing').disabled=false;
+  // Pre-populate with expected income entries
+  var gq=$('gq-ing');gq.innerHTML='';
+  ING_FUENTES.forEach(function(ig,i){
+    var row=document.createElement('div');
+    row.className='grow';row.id='fi-'+i;
+    row.style.gridTemplateColumns='1fr 120px 100px auto';
+    var fOpts=['Salario Andres','Salario Daniela','Arriendo Casa','Arriendo Apto','Otro ingreso'].map(function(f){
+      return'<option value="'+f+'"'+(f===ig.f?' selected':'')+'>'+f+'</option>';}).join('');
+    row.innerHTML='<select id="fi-f-'+i+'" style="font-size:12px">'+fOpts+'</select>'+
+      '<input type="date" id="fi-d-'+i+'" value="'+new Date(curY,curM,ig.frec==='quincenal'?(i<2?15:30):28).toISOString().split('T')[0]+'" style="font-size:12px">'+
+      '<input type="number" id="fi-m-'+i+'" value="'+ig.e+'" min="1" step="1000" style="font-size:12px;text-align:right">'+
+      '<button class="dbtn" onclick="this.closest(\".grow\").remove()">&#x2715;</button>';
+    gq.appendChild(row);
+  });
+  // Add button for extra row
+  var addBtn=document.createElement('button');
+  addBtn.className='abtn';addBtn.innerHTML='<span style="font-size:16px">+</span> Agregar ingreso';
+  addBtn.onclick=function(){agregarFilaIngreso();};
+  gq.appendChild(addBtn);
+  $('overlay-ing').classList.add('open');
+}
+
+var fiIngId=100;
+function agregarFilaIngreso(){
+  var i=++fiIngId;
+  var addBtn=$('gq-ing').lastChild;
+  var row=document.createElement('div');
+  row.className='grow';row.id='fi-'+i;
+  row.style.gridTemplateColumns='1fr 120px 100px auto';
+  var fOpts=['Salario Andres','Salario Daniela','Arriendo Casa','Arriendo Apto','Otro ingreso'].map(function(f){
+    return'<option value="'+f+'">'+f+'</option>';}).join('');
+  row.innerHTML='<select id="fi-f-'+i+'" style="font-size:12px">'+fOpts+'</select>'+
+    '<input type="date" id="fi-d-'+i+'" value="'+new Date(curY,curM,28).toISOString().split('T')[0]+'" style="font-size:12px">'+
+    '<input type="number" id="fi-m-'+i+'" placeholder="monto" min="1" step="1000" style="font-size:12px;text-align:right">'+
+    '<button class="dbtn" onclick="this.closest(\".grow\").remove()">&#x2715;</button>';
+  $('gq-ing').insertBefore(row, addBtn);
+}
+
+function cerrarModalIngresos(){$('overlay-ing').classList.remove('open');load();}
+
+async function guardarIngresos(){
+  var filas=Array.from($('gq-ing').querySelectorAll('.grow'));
+  if(!filas.length){return;}
+  var ingresos=[];var valido=true;
+  filas.forEach(function(f){
+    f.classList.remove('err-row');
+    var num=f.id.split('-')[1];
+    var fuente=document.getElementById('fi-f-'+num);
+    var fecha=document.getElementById('fi-d-'+num);
+    var monto=document.getElementById('fi-m-'+num);
+    if(!fuente||!fecha||!monto)return;
+    var m=parseFloat(monto.value);
+    if(!m||m<=0){f.classList.add('err-row');valido=false;return;}
+    ingresos.push({fuente:fuente.value,fecha:fecha.value,monto:m,quien:fuente.value.includes('Daniela')?'Daniela':'Andres',frecuencia:'manual',el:f,num:num});
+  });
+  if(!valido){setSmsgIng('Revisa los campos en rojo','err');return;}
+  $('sbtn-ing').disabled=true;$('pb-ing').style.display='block';
+  setSmsgIng('Guardando...','');
+  var ok=0,fail=0;
+  for(var i=0;i<ingresos.length;i++){
+    var g=ingresos[i];
+    try{
+      var r=await db.from('ingresos').insert({fuente:g.fuente,monto:g.monto,fecha:g.fecha,quien:g.quien,frecuencia:g.frecuencia});
+      if(r.error)throw r.error;
+      g.el.classList.add('saved');ok++;
+    }catch(e){fail++;g.el.classList.add('err-row');}
+    $('pf-ing').style.width=Math.round(((i+1)/ingresos.length)*100)+'%';
+  }
+  if(fail===0){setSmsgIng(ok+' ingreso'+(ok>1?'s':'')+' guardado'+(ok>1?'s':''),'ok');setTimeout(cerrarModalIngresos,1500);}
+  else{setSmsgIng(ok+' guardados, '+fail+' con error','err');$('sbtn-ing').disabled=false;}
+}
+
+function setSmsgIng(msg,tipo){var el=$('smsg-ing');el.textContent=msg;el.className='smsg'+(tipo?' '+tipo:'');}
 
 buildTabs();
 load();
