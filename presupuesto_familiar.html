@@ -380,7 +380,7 @@ async function load(){
 function render(rows){
   const bycat={};
   rows.forEach(r=>{const c=(r.categoria||'otros').trim();bycat[c]=(bycat[c]||0)+(parseFloat(r.monto)||0);});
-  const catList=Object.entries(CATS).map(([id,c])=>({id,label:c.label,emoji:c.emoji,pto:c.budget,real:bycat[id]||0}));
+  const catList=Object.entries(CATS).map(([id,c])=>({id,label:c.label,emoji:c.emoji,pto:c.budget,real:bycat[id]||0})).sort((a,b)=>b.pto-a.pto);
   const totPto=Object.values(CATS).reduce((a,c)=>a+c.budget,0);
   const totReal=rows.reduce((a,r)=>a+(parseFloat(r.monto)||0),0);
   const qPto=INGRESOS_TOTAL-totPto, qReal=INGRESOS_TOTAL-totReal;
