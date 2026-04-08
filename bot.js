@@ -30,6 +30,10 @@ const CATS = {
   deudas:         { emoji: "💳", label: "Deudas",          budget: 470000  },
   fondoCarro:     { emoji: "🚗", label: "Fondo Carro",     budget: 500000  },
   fondoImpuestos: { emoji: "🏛️", label: "Fondo Impuestos", budget: 500000  },
+  samuel:         { emoji: "👦", label: "Samuel",          budget: 500000  },
+  imprevistos:    { emoji: "🆘", label: "Imprevistos",      budget: 200000  },
+  jardinJuanpa:   { emoji: "🌿", label: "Jardín JuanPa",    budget: 1171000 },
+  zeus:           { emoji: "🐕", label: "Zeús",             budget: 400000  },
   otros:          { emoji: "📦", label: "Otros",           budget: 0       },
 };
 
