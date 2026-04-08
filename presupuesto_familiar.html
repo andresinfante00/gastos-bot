@@ -280,12 +280,27 @@ const CATS={
   deudas:         {emoji:'💳',label:'Deudas',          budget:470000},
   fondoCarro:     {emoji:'🚗',label:'Fondo Carro',     budget:500000},
   fondoImpuestos: {emoji:'🏛️',label:'Fondo Impuestos', budget:500000},
+  samuel:         {emoji:'👦',label:'Samuel',          budget:500000},
+  imprevistos:    {emoji:'🆘',label:'Imprevistos',      budget:200000},
+  jardinJuanpa:   {emoji:'🌿',label:'Jardín JuanPa',    budget:1171000},
+  zeus:           {emoji:'🐕',label:'Zeús',             budget:400000},
   otros:          {emoji:'📦',label:'Otros',           budget:0},
 };
 const INGRESOS_TOTAL=13848000;
 const ING=[{f:'Salario Andrés',e:7560000},{f:'Salario Daniela',e:3800000},{f:'Arriendo casa',e:1132000},{f:'Arriendo apto',e:1156000}];
 const DEU=[{n:'Juan Pablo',s:1400000},{n:'Davivienda',s:8000000},{n:'Impuestos',s:4000000},{n:'TC Colchón/Licuadora',s:5700000}];
-const AHO=[{t:'Ahorro JuanPa',a:760000},{t:'Ahorro Familia',a:0},{t:'Fondo Carro',a:0},{t:'Fondo Impuestos',a:0}];
+const AHO=[
+  {id:'juanpa',    t:'Ahorro JuanPa',    meta:760000},
+  {id:'familia',   t:'Ahorro Familia',   meta:1982000},
+  {id:'carro',     t:'Fondo Carro',      meta:500000},
+  {id:'impuestos', t:'Fondo Impuestos',  meta:500000},
+  {id:'samuel',    t:'Ahorro Samuel',    meta:100000},
+];
+const BANCOS=['Bancolombia','Nequi','Davivienda','NU','Daviplata','BBVA','Falabella','Otro'];
+function getBanco(id){return localStorage.getItem('banco_'+id)||'';}
+function setBanco(id,val){localStorage.setItem('banco_'+id,val);}
+function getSaldo(id){return parseFloat(localStorage.getItem('saldo_'+id)||0);}
+function setSaldo(id,val){localStorage.setItem('saldo_'+id,val);}
 const MN=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 const fmt=n=>{const a=Math.abs(Math.round(n||0));return(n<0?'-':'')+'$\u00a0'+new Intl.NumberFormat('es-CO').format(a)};
@@ -304,7 +319,40 @@ function buildTabs(){
     const b=document.createElement('button');
     b.className='tab'+(m===curM?' active':'');
     b.textContent=MN[m].substring(0,3);
-    b.onclick=()=>{curM=m;buildTabs();load();};
+    b.onclick=()=>{curM=m;function renderAhorro(){
+  const totMeta=AHO.reduce((a,x)=>a+x.meta,0);
+  const totSaldo=AHO.reduce((a,x)=>a+getSaldo(x.id),0);
+  $('ar').innerHTML=AHO.map(a=>{
+    const banco=getBanco(a.id);
+    const saldo=getSaldo(a.id);
+    const pct=a.meta>0?Math.min(Math.round(saldo/a.meta*100),100):0;
+    const bOpts=BANCOS.map(b=>`<option value="${b}"${banco===b?' selected':''}>${b}</option>`).join('');
+    return`<div style="padding:10px 14px;border-bottom:0.5px solid var(--bd)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:12px;color:var(--t)">${a.t}</span>
+        <span style="font-size:12px;font-weight:500;color:var(--gr)">${saldo>0?fmt(saldo):'—'}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+        <select onchange="setBanco('${a.id}',this.value);renderAhorro()" style="font-size:11px;padding:4px 8px;background:var(--s2);border:0.5px solid var(--bd);border-radius:var(--rs);color:var(--t2)">
+          <option value="">Banco...</option>${bOpts}
+        </select>
+        <input type="number" placeholder="Saldo actual" value="${saldo||''}"
+          onchange="setSaldo('${a.id}',this.value);renderAhorro()"
+          style="font-size:11px;padding:4px 8px;background:var(--s2);border:0.5px solid var(--bd);border-radius:var(--rs);color:var(--t);text-align:right">
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="flex:1;height:4px;background:var(--s2);border-radius:2px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:var(--gr);border-radius:2px"></div>
+        </div>
+        <span style="font-size:10px;color:var(--t3)">${pct}% de ${fmt(a.meta)}</span>
+      </div>
+    </div>`;
+  }).join('');
+  const totSaldo2=AHO.reduce((a,x)=>a+getSaldo(x.id),0);
+  $('at').textContent=totSaldo2>0?fmt(totSaldo2):'$ 0';
+}
+
+buildTabs();load();};
     el.appendChild(b);
   });
 }
@@ -398,8 +446,7 @@ function render(rows){
   $('it').textContent=fmt(INGRESOS_TOTAL);
   $('dr').innerHTML=DEU.map(d=>`<div class="mr"><span class="ml">${d.n}<span class="pill pr" style="margin-left:6px">deuda</span></span><span class="mv" style="color:var(--am)">${fmt(d.s)}</span></div>`).join('');
   $('dt').textContent=fmt(DEU.reduce((a,d)=>a+d.s,0));
-  $('ar').innerHTML=AHO.map(a=>`<div class="mr"><span class="ml">${a.t}<span class="pill pg" style="margin-left:6px">ahorro</span></span><span class="mv" style="color:var(--gr)">${a.a>0?fmt(a.a):'—'}</span></div>`).join('');
-  $('at').textContent=fmt(AHO.reduce((a,x)=>a+x.a,0));
+  renderAhorro();
 }
 
 // ── BORRAR GASTO ──────────────────────────────────────────────────────────────
@@ -527,6 +574,39 @@ function setStatus(msg,tipo){
   const el=$('status-msg');
   el.textContent=msg;
   el.className='status-msg'+(tipo?' '+tipo:'');
+}
+
+function renderAhorro(){
+  const totMeta=AHO.reduce((a,x)=>a+x.meta,0);
+  const totSaldo=AHO.reduce((a,x)=>a+getSaldo(x.id),0);
+  $('ar').innerHTML=AHO.map(a=>{
+    const banco=getBanco(a.id);
+    const saldo=getSaldo(a.id);
+    const pct=a.meta>0?Math.min(Math.round(saldo/a.meta*100),100):0;
+    const bOpts=BANCOS.map(b=>`<option value="${b}"${banco===b?' selected':''}>${b}</option>`).join('');
+    return`<div style="padding:10px 14px;border-bottom:0.5px solid var(--bd)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:12px;color:var(--t)">${a.t}</span>
+        <span style="font-size:12px;font-weight:500;color:var(--gr)">${saldo>0?fmt(saldo):'—'}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+        <select onchange="setBanco('${a.id}',this.value);renderAhorro()" style="font-size:11px;padding:4px 8px;background:var(--s2);border:0.5px solid var(--bd);border-radius:var(--rs);color:var(--t2)">
+          <option value="">Banco...</option>${bOpts}
+        </select>
+        <input type="number" placeholder="Saldo actual" value="${saldo||''}"
+          onchange="setSaldo('${a.id}',this.value);renderAhorro()"
+          style="font-size:11px;padding:4px 8px;background:var(--s2);border:0.5px solid var(--bd);border-radius:var(--rs);color:var(--t);text-align:right">
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="flex:1;height:4px;background:var(--s2);border-radius:2px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:var(--gr);border-radius:2px"></div>
+        </div>
+        <span style="font-size:10px;color:var(--t3)">${pct}% de ${fmt(a.meta)}</span>
+      </div>
+    </div>`;
+  }).join('');
+  const totSaldo2=AHO.reduce((a,x)=>a+getSaldo(x.id),0);
+  $('at').textContent=totSaldo2>0?fmt(totSaldo2):'$ 0';
 }
 
 buildTabs();load();
