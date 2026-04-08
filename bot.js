@@ -3,10 +3,10 @@ const Anthropic = require("@anthropic-ai/sdk");
 const { createClient } = require("@supabase/supabase-js");
 
 // ── CONFIGURACIÓN ──────────────────────────────────────────────────────────
-const TELEGRAM_TOKEN = "8006973112:AAF_-YIJD5mE-9HORbI7eWFab96bQk1zsR8";
-const ANTHROPIC_KEY  = "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";
-const SUPABASE_URL   = "https://rciwveeaxydullpcwvmu.supabase.co";
-const SUPABASE_KEY   = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJjaXd2ZWVheHlkdWxscGN3dm11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNTQzMDksImV4cCI6MjA4ODgzMDMwOX0.666zyqQ-Ps9j9DHVT1fuL58O-dfBAgJLWGcp6DGeAsA";
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const ANTHROPIC_KEY  = process.env.ANTHROPIC_KEY;
+const SUPABASE_URL   = process.env.SUPABASE_URL;
+const SUPABASE_KEY   = process.env.SUPABASE_KEY;
 
 // ID del grupo familiar — se llena automático cuando el bot recibe el primer mensaje del grupo
 let GROUP_CHAT_ID = null;
@@ -47,25 +47,23 @@ const bar = (pct) => {
 };
 
 // ── ESTADO TEMPORAL ────────────────────────────────────────────────────────
-const pendientes = {};   // gastos esperando confirmación de categoría
-const editando   = {};   // gastos esperando edición
+const pendientes = {};
+const editando   = {};
 
 // ── GUARDAR GASTO EN SUPABASE ───────────────────────────────────────────────
 async function guardarGasto(chatId, gasto, who) {
   const cat = CATS[gasto.category] || CATS["otros"];
 
-  // Guardar en Supabase con la fecha exacta del momento del gasto
   await supabase.from("gastos").insert({
     monto:       gasto.amount,
     categoria:   gasto.category,
     descripcion: gasto.description,
     quien:       who,
     fuente:      gasto.source,
-    fecha:       gasto.fecha, // fecha real del gasto
+    fecha:       gasto.fecha,
   });
 
-  // Calcular progreso del mes del gasto
-  const fechaInicio = gasto.fecha.slice(0, 7) + "-01"; // primer día del mes del gasto
+  const fechaInicio = gasto.fecha.slice(0, 7) + "-01";
 
   const { data } = await supabase
     .from("gastos")
@@ -76,10 +74,10 @@ async function guardarGasto(chatId, gasto, who) {
 
   const totalMes = (data || []).reduce((s, r) => s + r.monto, 0);
   const pct      = cat.budget > 0 ? (totalMes / cat.budget) * 100 : 0;
-  const status    = pct > 100 ? "⚠️ EXCEDIDO"
-                  : pct > 80  ? "⚡ Cuidado"
-                  : "✅";
-  const origen    = gasto.source === "applepay" ? `${who} (Apple Pay 💳)` : who;
+  const status   = pct > 100 ? "⚠️ EXCEDIDO"
+                 : pct > 80  ? "⚡ Cuidado"
+                 : "✅";
+  const origen   = gasto.source === "applepay" ? `${who} (Apple Pay 💳)` : who;
   const mesNombre = MESES[parseInt(gasto.fecha.slice(5, 7)) - 1];
   const restante  = cat.budget - totalMes;
 
@@ -119,7 +117,6 @@ async function enviarResumenMensual(chatId, anio, mes) {
 
   if (!data || data.length === 0) return;
 
-  // Agrupar por categoría
   const totalesCat = {};
   data.forEach(g => {
     totalesCat[g.categoria] = (totalesCat[g.categoria] || 0) + g.monto;
@@ -134,9 +131,9 @@ async function enviarResumenMensual(chatId, anio, mes) {
   Object.entries(CATS).forEach(([id, cat]) => {
     const gastado = totalesCat[id] || 0;
     if (gastado === 0 && cat.budget === 0) return;
-    const pct    = cat.budget > 0 ? Math.round((gastado / cat.budget) * 100) : 0;
-    const icono  = pct > 100 ? "⚠️" : pct > 80 ? "⚡" : "✅";
-    const linea  = cat.budget > 0
+    const pct   = cat.budget > 0 ? Math.round((gastado / cat.budget) * 100) : 0;
+    const icono = pct > 100 ? "⚠️" : pct > 80 ? "⚡" : "✅";
+    const linea = cat.budget > 0
       ? `${icono} ${cat.emoji} ${cat.label}: ${fmt(gastado)} de ${fmt(cat.budget)} · ${pct}%`
       : `📦 ${cat.emoji} ${cat.label}: ${fmt(gastado)}`;
     msg += linea + "\n";
@@ -152,22 +149,19 @@ async function enviarResumenMensual(chatId, anio, mes) {
   await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
 }
 
-// ── VERIFICAR FIN DE MES (corre cada hora) ─────────────────────────────────
+// ── VERIFICAR FIN DE MES ────────────────────────────────────────────────────
 function verificarFinDeMes() {
   setInterval(async () => {
     if (!GROUP_CHAT_ID) return;
-
-    const ahora    = new Date();
-    const maniana  = new Date(ahora);
+    const ahora   = new Date();
+    const maniana = new Date(ahora);
     maniana.setDate(ahora.getDate() + 1);
-
-    // Si mañana es día 1 → hoy es el último día del mes → enviar resumen
     if (maniana.getDate() === 1 && ahora.getHours() === 20) {
       const mes  = ahora.getMonth() + 1;
       const anio = ahora.getFullYear();
       await enviarResumenMensual(GROUP_CHAT_ID, anio, mes);
     }
-  }, 60 * 60 * 1000); // cada hora
+  }, 60 * 60 * 1000);
 }
 
 // ── ESCUCHAR MENSAJES ───────────────────────────────────────────────────────
@@ -177,23 +171,18 @@ bot.on("message", async (msg) => {
   const userId = msg.from.id;
   const who    = msg.from.first_name || "Alguien";
 
-  // Guardar el chat ID del grupo automáticamente
   if (msg.chat.type === "group" || msg.chat.type === "supergroup") {
     GROUP_CHAT_ID = chatId;
   }
 
   if (!text || text.startsWith("/")) {
-
-    // Normalizar comandos en grupos (llegan como /comando@NombreBot)
     const cmd = text.split("@")[0].toLowerCase();
 
-    // /resumen → resumen del mes actual
     if (cmd === "/resumen") {
       const ahora = new Date();
       await enviarResumenMensual(chatId, ahora.getFullYear(), ahora.getMonth() + 1);
     }
 
-    // /ultimos → últimos 5 gastos
     if (cmd === "/ultimos") {
       const { data } = await supabase
         .from("gastos")
@@ -217,7 +206,6 @@ bot.on("message", async (msg) => {
       await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
     }
 
-    // /borrar ID → borrar un gasto
     if (cmd.startsWith("/borrar")) {
       const id = text.split(" ")[1] || text.split("@")[0].split(" ")[1];
       if (!id) {
@@ -232,7 +220,6 @@ bot.on("message", async (msg) => {
       }
     }
 
-    // /editar ID → editar monto o categoría
     if (cmd.startsWith("/editar")) {
       const id = text.split(" ")[1];
       if (!id) {
@@ -254,16 +241,14 @@ bot.on("message", async (msg) => {
       let msg = `✏️ *Editando gasto ID ${id}:*\n\n`;
       msg += `${cat.emoji} ${cat.label} — *${fmt(data.monto)}*\n`;
       msg += `📝 ${data.descripcion}\n\n`;
-      msg += `¿Qué quieres cambiar?\n`;
-      msg += `*1.* El monto\n`;
-      msg += `*2.* La categoría`;
+      msg += `¿Qué quieres cambiar?\n*1.* El monto\n*2.* La categoría`;
       await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
     }
 
     return;
   }
 
-  // ── Si hay una edición en curso para este usuario ─────────────────────────
+  // ── Edición en curso ───────────────────────────────────────────────────────
   if (editando[userId]) {
     const estado = editando[userId];
 
@@ -321,20 +306,18 @@ bot.on("message", async (msg) => {
     }
   }
 
-  // ── Si hay un gasto pendiente de confirmar para este usuario ──────────────
+  // ── Confirmación de gasto pendiente ───────────────────────────────────────
   if (pendientes[userId]) {
     const gasto   = pendientes[userId];
     const catKeys = Object.keys(CATS);
     const num     = parseInt(text);
 
-    // Confirmó con ✅ o "si"
     if (text === "✅" || text.toLowerCase() === "si" || text.toLowerCase() === "sí") {
       delete pendientes[userId];
       await guardarGasto(chatId, gasto, who);
       return;
     }
 
-    // Eligió una categoría por número
     if (!isNaN(num) && num >= 1 && num <= catKeys.length) {
       gasto.category = catKeys[num - 1];
       delete pendientes[userId];
@@ -384,7 +367,6 @@ Mensaje: "${text}"`,
     const categoryId = Object.keys(CATS).includes(resultado.category) ? resultado.category : "otros";
     const cat        = CATS[categoryId];
 
-    // Guardar gasto pendiente
     pendientes[userId] = {
       amount:      resultado.amount,
       category:    categoryId,
@@ -393,12 +375,10 @@ Mensaje: "${text}"`,
       fecha: fechaHoy,
     };
 
-    // Construir lista de categorías para botones
     const listaCats = Object.entries(CATS)
       .map(([, c], i) => `${i + 1}. ${c.emoji} ${c.label}`)
       .join("\n");
 
-    // Pedir confirmación
     const confirmMsg =
       `🤖 Detecté este gasto:\n\n` +
       `${cat.emoji} *${cat.label}*\n` +
@@ -420,7 +400,7 @@ Mensaje: "${text}"`,
   }
 });
 
-// ── SERVIDOR HTTP + AUTO-PING (evita que Render duerma el bot) ────────────
+// ── SERVIDOR HTTP + AUTO-PING RENDER ─────────────────────────────────────────
 const http  = require("http");
 const https = require("https");
 const PORT  = process.env.PORT || 3000;
@@ -432,18 +412,29 @@ http.createServer((req, res) => {
   console.log("🌐 Servidor HTTP escuchando en puerto " + PORT);
 });
 
-// Auto-ping cada 10 minutos para mantener el bot despierto en Render
 const BOT_URL = process.env.RENDER_EXTERNAL_URL || "https://gastos-bot-csuv.onrender.com";
 setInterval(() => {
   https.get(BOT_URL, (res) => {
-    console.log(`🏓 Auto-ping OK — ${new Date().toLocaleTimeString("es-CO")}`);
+    console.log(`🏓 Auto-ping Render OK — ${new Date().toLocaleTimeString("es-CO")}`);
   }).on("error", (err) => {
-    console.log("⚠️ Auto-ping error:", err.message);
+    console.log("⚠️ Auto-ping Render error:", err.message);
   });
-}, 3 * 60 * 1000); // cada 3 minutos
+}, 3 * 60 * 1000);
 
-// ── ARRANCAR ───────────────────────────────────────────────────────────────
+// ── PING A SUPABASE (evita que se pause el proyecto gratuito) ────────────────
+// Supabase pausa proyectos sin actividad por 7 días. Este ping lo mantiene activo.
+setInterval(async () => {
+  try {
+    await supabase.from("gastos").select("id").limit(1);
+    console.log(`💾 Supabase ping OK — ${new Date().toLocaleTimeString("es-CO")}`);
+  } catch (e) {
+    console.log("⚠️ Supabase ping error:", e.message);
+  }
+}, 1000 * 60 * 60 * 24 * 3); // cada 3 días
+
+// ── ARRANCAR ──────────────────────────────────────────────────────────────────
 verificarFinDeMes();
 console.log("🤖 GastosBot corriendo...");
 console.log("📅 Resumen automático activado — se envía el último día del mes a las 8pm");
 console.log("📊 Escribe /resumen en el grupo para ver el resumen en cualquier momento");
+console.log("💾 Ping a Supabase activo — proyecto no se pausará");
