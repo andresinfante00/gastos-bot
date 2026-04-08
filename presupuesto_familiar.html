@@ -340,7 +340,43 @@ function buildTabs(){
     const b=document.createElement('button');
     b.className='tab'+(m===curM?' active':'');
     b.textContent=MN[m].substring(0,3);
-    b.onclick=()=>{curM=m;function toggleCat(id){
+    b.onclick=()=>{curM=m;buildTabs();load();};
+    el.appendChild(b);
+  });
+}
+
+let visRows=[];
+function buildCatRows(){
+  return visRows.map(r=>{
+    const ratio=r.pto>0?r.real/r.pto:(r.real>0?1.01:0);
+    const pend=r.pto-r.real;
+    const col=ratio>=1?'#ef4444':ratio>=.85?'#f59e0b':'#22c55e';
+    const bw=Math.min(Math.round(ratio*100),100);
+    const badge=ratio>=1?'<span class="badge over">Excedido</span>':ratio>=.85?'<span class="badge warn">Atención</span>':r.real>0?'<span class="badge ok">Ok</span>':'<span class="badge pend">Sin gastos</span>';
+    const subs=SUBCATS[r.id]||[];
+    const isOpen=expandedCats.has(r.id);
+    const hasSubs=subs.length>0;
+    const arrow=hasSubs?(isOpen?'▼':'▶'):'';
+    const arrowSpan=hasSubs?`<span style="font-size:9px;color:var(--t3);margin-left:8px">${arrow}</span>`:'';
+    let html=`<tr style="cursor:${hasSubs?'pointer':'default'}" onclick="${hasSubs?`toggleCat('${r.id}')`:''}" class="cat-main-row">
+      <td><span style="font-size:14px">${r.emoji}</span> <strong>${r.label}</strong>${arrowSpan}</td>
+      <td>${r.pto>0?fmt(r.pto):'—'}</td>
+      <td style="text-align:left"><div class="bw"><div class="bg2"><div class="bf" style="width:${bw}%;background:${col}"></div></div>
+      <span style="font-size:12px;color:var(--t2);min-width:80px">${r.real>0?fmt(r.real):'—'}</span></div></td>
+      <td style="color:${pend>=0?'var(--gr)':'var(--rd)'}">${r.pto>0?fmt(pend):'—'}</td>
+      <td>${badge}</td></tr>`;
+    if(isOpen&&hasSubs){
+      html+=subs.map(s=>`<tr style="background:rgba(255,255,255,0.025)">
+        <td style="padding-left:34px;font-size:12px;color:var(--t2)">↳ ${s.nombre}</td>
+        <td style="font-size:12px;color:var(--t3)">${fmt(s.pto)}</td>
+        <td colspan="2" style="font-size:11px;color:var(--t3);text-align:left;padding-left:20px">presupuesto individual</td>
+        <td></td></tr>`).join('');
+    }
+    return html;
+  }).join('');
+}
+
+function toggleCat(id){
   if(expandedCats.has(id))expandedCats.delete(id);
   else expandedCats.add(id);
   $('cb').innerHTML=buildCatRows();
@@ -425,37 +461,7 @@ function render(rows){
   $('q2').textContent=fmt(qReal);$('q2').style.color=qReal>=0?'var(--gr)':'var(--rd)';
   $('qp').textContent=pctStr(totReal,totPto)+' ejecutado';
 
-  const vis=catList.filter(r=>r.pto>0||r.real>0);
-  function buildCatRows(){
-    return vis.map(r=>{
-      const ratio=r.pto>0?r.real/r.pto:(r.real>0?1.01:0);
-      const pend=r.pto-r.real;
-      const col=ratio>=1?'#ef4444':ratio>=.85?'#f59e0b':'#22c55e';
-      const bw=Math.min(Math.round(ratio*100),100);
-      const badge=ratio>=1?'<span class="badge over">Excedido</span>':ratio>=.85?'<span class="badge warn">Atención</span>':r.real>0?'<span class="badge ok">Ok</span>':'<span class="badge pend">Sin gastos</span>';
-      const subs=SUBCATS[r.id]||[];
-      const isOpen=expandedCats.has(r.id);
-      const hasSubs=subs.length>0;
-      const chevron=hasSubs?`<span style="font-size:10px;color:var(--t3);margin-left:6px;transition:transform .2s;display:inline-block;transform:${isOpen?'rotate(90deg)':'rotate(0deg)'}"">▶</span>`:'';
-      let html=`<tr style="cursor:${hasSubs?'pointer':'default'}" onclick="${hasSubs?`toggleCat('${r.id}')`:''}" class="cat-main-row">
-        <td><span style="font-size:14px">${r.emoji}</span> <span style="font-weight:500">${r.label}</span>${chevron}</td>
-        <td>${r.pto>0?fmt(r.pto):'—'}</td>
-        <td style="text-align:left"><div class="bw"><div class="bg2"><div class="bf" style="width:${bw}%;background:${col}"></div></div>
-        <span style="font-size:12px;color:var(--t2);min-width:80px">${r.real>0?fmt(r.real):'—'}</span></div></td>
-        <td style="color:${pend>=0?'var(--gr)':'var(--rd)'}">${r.pto>0?fmt(pend):'—'}</td>
-        <td>${badge}</td></tr>`;
-      if(isOpen&&hasSubs){
-        html+=subs.map(s=>`<tr class="sub-row" style="background:rgba(255,255,255,0.02)">
-          <td style="padding-left:36px;font-size:12px;color:var(--t2)">↳ ${s.nombre}</td>
-          <td style="font-size:12px;color:var(--t3)">${fmt(s.pto)}</td>
-          <td style="text-align:left"><div class="bw"><div class="bg2" style="width:50px"><div class="bf" style="width:0%;background:#5a6a80"></div></div>
-          <span style="font-size:11px;color:var(--t3)">—</span></div></td>
-          <td style="font-size:12px;color:var(--t3)">—</td>
-          <td></td></tr>`).join('');
-      }
-      return html;
-    }).join('');
-  }
+  visRows=catList.filter(r=>r.pto>0||r.real>0);
   $('cb').innerHTML=buildCatRows();
   $('cf').innerHTML=`<tr><td>Total</td><td>${fmt(totPto)}</td>
     <td style="text-align:left;padding-left:20px">${fmt(totReal)}</td>
@@ -622,11 +628,8 @@ function setStatus(msg,tipo){
   el.className='status-msg'+(tipo?' '+tipo:'');
 }
 
-function toggleCat(id){
-  if(expandedCats.has(id))expandedCats.delete(id);
-  else expandedCats.add(id);
-  $('cb').innerHTML=buildCatRows();
-}
+
+
 
 function renderAhorro(){
   const totMeta=AHO.reduce((a,x)=>a+x.meta,0);
