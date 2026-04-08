@@ -286,6 +286,27 @@ const CATS={
   zeus:           {emoji:'🐕',label:'Zeús',             budget:400000},
   otros:          {emoji:'📦',label:'Otros',           budget:0},
 };
+const SUBCATS={
+  vivienda:       [{nombre:'Arriendo',pto:1600000},{nombre:'Hipotecario',pto:870000},{nombre:'Administración',pto:223000}],
+  mercado:        [{nombre:'Mercado',pto:1200000},{nombre:'Aseo',pto:100000},{nombre:'Imprevistos mercado',pto:600000}],
+  familia:        [{nombre:'Cuidado JuanPa',pto:1171000},{nombre:'Jardín JuanPa',pto:900000}],
+  transporte:     [{nombre:'Gasolina',pto:450000}],
+  servicios:      [{nombre:'Luz',pto:100000},{nombre:'Gas',pto:70000},{nombre:'Agua',pto:105000},{nombre:'Internet',pto:120000}],
+  celulares:      [{nombre:'Celular Dani',pto:40000},{nombre:'Cel Jaiver',pto:40000}],
+  ocio:           [{nombre:'Ocio general',pto:500000}],
+  personalJ:      [{nombre:'Gastos personales J',pto:400000}],
+  personalD:      [{nombre:'Gastos personales D',pto:400000}],
+  deudas:         [{nombre:'Davivienda',pto:470000},{nombre:'Falabella',pto:360000},{nombre:'Impuesto casa y Dian',pto:650000}],
+  fondoCarro:     [{nombre:'Fondo Carro',pto:500000}],
+  fondoImpuestos: [{nombre:'Fondo Impuestos',pto:500000}],
+  samuel:         [{nombre:'Samuel',pto:500000}],
+  jardinJuanpa:   [{nombre:'Jardín JuanPa',pto:1171000}],
+  zeus:           [{nombre:'Zeús',pto:400000}],
+  imprevistos:    [{nombre:'Imprevistos',pto:200000}],
+  otros:          [],
+};
+const expandedCats=new Set();
+
 const INGRESOS_TOTAL=13848000;
 const ING=[{f:'Salario Andrés',e:7560000},{f:'Salario Daniela',e:3800000},{f:'Arriendo casa',e:1132000},{f:'Arriendo apto',e:1156000}];
 const DEU=[{n:'Juan Pablo',s:1400000},{n:'Davivienda',s:8000000},{n:'Impuestos',s:4000000},{n:'TC Colchón/Licuadora',s:5700000}];
@@ -319,7 +340,13 @@ function buildTabs(){
     const b=document.createElement('button');
     b.className='tab'+(m===curM?' active':'');
     b.textContent=MN[m].substring(0,3);
-    b.onclick=()=>{curM=m;function renderAhorro(){
+    b.onclick=()=>{curM=m;function toggleCat(id){
+  if(expandedCats.has(id))expandedCats.delete(id);
+  else expandedCats.add(id);
+  $('cb').innerHTML=buildCatRows();
+}
+
+function renderAhorro(){
   const totMeta=AHO.reduce((a,x)=>a+x.meta,0);
   const totSaldo=AHO.reduce((a,x)=>a+getSaldo(x.id),0);
   $('ar').innerHTML=AHO.map(a=>{
@@ -399,18 +426,37 @@ function render(rows){
   $('qp').textContent=pctStr(totReal,totPto)+' ejecutado';
 
   const vis=catList.filter(r=>r.pto>0||r.real>0);
-  $('cb').innerHTML=vis.map(r=>{
-    const ratio=r.pto>0?r.real/r.pto:(r.real>0?1.01:0);
-    const pend=r.pto-r.real;
-    const col=ratio>=1?'#ef4444':ratio>=.85?'#f59e0b':'#22c55e';
-    const bw=Math.min(Math.round(ratio*100),100);
-    const badge=ratio>=1?'<span class="badge over">Excedido</span>':ratio>=.85?'<span class="badge warn">Atención</span>':r.real>0?'<span class="badge ok">Ok</span>':'<span class="badge pend">Sin gastos</span>';
-    return`<tr><td>${r.emoji} ${r.label}</td><td>${r.pto>0?fmt(r.pto):'—'}</td>
-      <td style="text-align:left"><div class="bw"><div class="bg2"><div class="bf" style="width:${bw}%;background:${col}"></div></div>
-      <span style="font-size:12px;color:var(--t2);min-width:80px">${r.real>0?fmt(r.real):'—'}</span></div></td>
-      <td style="color:${pend>=0?'var(--gr)':'var(--rd)'}">${r.pto>0?fmt(pend):'—'}</td>
-      <td>${badge}</td></tr>`;
-  }).join('');
+  function buildCatRows(){
+    return vis.map(r=>{
+      const ratio=r.pto>0?r.real/r.pto:(r.real>0?1.01:0);
+      const pend=r.pto-r.real;
+      const col=ratio>=1?'#ef4444':ratio>=.85?'#f59e0b':'#22c55e';
+      const bw=Math.min(Math.round(ratio*100),100);
+      const badge=ratio>=1?'<span class="badge over">Excedido</span>':ratio>=.85?'<span class="badge warn">Atención</span>':r.real>0?'<span class="badge ok">Ok</span>':'<span class="badge pend">Sin gastos</span>';
+      const subs=SUBCATS[r.id]||[];
+      const isOpen=expandedCats.has(r.id);
+      const hasSubs=subs.length>0;
+      const chevron=hasSubs?`<span style="font-size:10px;color:var(--t3);margin-left:6px;transition:transform .2s;display:inline-block;transform:${isOpen?'rotate(90deg)':'rotate(0deg)'}"">▶</span>`:'';
+      let html=`<tr style="cursor:${hasSubs?'pointer':'default'}" onclick="${hasSubs?`toggleCat('${r.id}')`:''}" class="cat-main-row">
+        <td><span style="font-size:14px">${r.emoji}</span> <span style="font-weight:500">${r.label}</span>${chevron}</td>
+        <td>${r.pto>0?fmt(r.pto):'—'}</td>
+        <td style="text-align:left"><div class="bw"><div class="bg2"><div class="bf" style="width:${bw}%;background:${col}"></div></div>
+        <span style="font-size:12px;color:var(--t2);min-width:80px">${r.real>0?fmt(r.real):'—'}</span></div></td>
+        <td style="color:${pend>=0?'var(--gr)':'var(--rd)'}">${r.pto>0?fmt(pend):'—'}</td>
+        <td>${badge}</td></tr>`;
+      if(isOpen&&hasSubs){
+        html+=subs.map(s=>`<tr class="sub-row" style="background:rgba(255,255,255,0.02)">
+          <td style="padding-left:36px;font-size:12px;color:var(--t2)">↳ ${s.nombre}</td>
+          <td style="font-size:12px;color:var(--t3)">${fmt(s.pto)}</td>
+          <td style="text-align:left"><div class="bw"><div class="bg2" style="width:50px"><div class="bf" style="width:0%;background:#5a6a80"></div></div>
+          <span style="font-size:11px;color:var(--t3)">—</span></div></td>
+          <td style="font-size:12px;color:var(--t3)">—</td>
+          <td></td></tr>`).join('');
+      }
+      return html;
+    }).join('');
+  }
+  $('cb').innerHTML=buildCatRows();
   $('cf').innerHTML=`<tr><td>Total</td><td>${fmt(totPto)}</td>
     <td style="text-align:left;padding-left:20px">${fmt(totReal)}</td>
     <td style="color:${(totPto-totReal)>=0?'var(--gr)':'var(--rd)'}">${fmt(totPto-totReal)}</td>
@@ -574,6 +620,12 @@ function setStatus(msg,tipo){
   const el=$('status-msg');
   el.textContent=msg;
   el.className='status-msg'+(tipo?' '+tipo:'');
+}
+
+function toggleCat(id){
+  if(expandedCats.has(id))expandedCats.delete(id);
+  else expandedCats.add(id);
+  $('cb').innerHTML=buildCatRows();
 }
 
 function renderAhorro(){
