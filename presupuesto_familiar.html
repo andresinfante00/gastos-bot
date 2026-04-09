@@ -252,6 +252,53 @@ select option{background:var(--s2)}
   </div>
 </div>
 
+<!-- MODAL EDITAR GASTO -->
+<div class="overlay" id="overlay-edit">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:460px">
+    <div class="mhdr"><h2>&#x270F;&#xFE0F; Editar gasto</h2><button class="xbtn" onclick="cerrarEditar()">&#x2715;</button></div>
+    <div class="mbody">
+      <input type="hidden" id="edit-id">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <div class="clbl" style="margin-bottom:6px">Descripci&#243;n</div>
+          <input type="text" id="edit-desc" placeholder="Descripcion del gasto" style="width:100%">
+        </div>
+        <div>
+          <div class="clbl" style="margin-bottom:6px">Categor&#237;a</div>
+          <select id="edit-cat" style="width:100%" onchange="actualizarSubEdit()"></select>
+        </div>
+        <div>
+          <div class="clbl" style="margin-bottom:6px">Subcategor&#237;a</div>
+          <select id="edit-subcat" style="width:100%"></select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <div class="clbl" style="margin-bottom:6px">Monto (COP)</div>
+            <input type="number" id="edit-monto" min="0" step="1000" style="width:100%;text-align:right">
+          </div>
+          <div>
+            <div class="clbl" style="margin-bottom:6px">Fecha</div>
+            <input type="date" id="edit-fecha" style="width:100%">
+          </div>
+        </div>
+        <div>
+          <div class="clbl" style="margin-bottom:6px">Qui&#233;n</div>
+          <select id="edit-quien" style="width:100%">
+            <option value="Andres">Andr&#233;s</option>
+            <option value="Daniela">Daniela</option>
+            <option value="Ambos">Ambos</option>
+          </select>
+        </div>
+      </div>
+      <div class="smsg" id="smsg-edit"></div>
+      <div class="fact">
+        <button class="rbtn" onclick="cerrarEditar()">Cancelar</button>
+        <button class="sbtn" id="sbtn-edit" onclick="guardarEdicion()">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL INGRESOS -->
 <div class="overlay" id="overlay-ing">
   <div class="modal" onclick="event.stopPropagation()">
@@ -960,6 +1007,61 @@ function guardarConfig(){
 }
 
 loadConfig();
+// ── EDITAR / BORRAR GASTO ─────────────────────────────────────────────────
+function editarGasto(id,cat,descEnc,monto,fecha,quien){
+  $('edit-id').value=id;
+  $('edit-desc').value=decodeURIComponent(descEnc);
+  $('edit-monto').value=monto;
+  $('edit-fecha').value=fecha;
+  // Populate cat select
+  var catSel=$('edit-cat');
+  catSel.innerHTML=Object.keys(CATS).map(function(k){
+    var c=CATS[k];return'<option value="'+k+'"'+(k===cat?' selected':'')+'>'+c.emoji+' '+c.label+'</option>';
+  }).join('');
+  actualizarSubEdit();
+  // Set quien
+  var quienSel=$('edit-quien');
+  for(var i=0;i<quienSel.options.length;i++){
+    if(quienSel.options[i].value===quien){quienSel.selectedIndex=i;break;}
+  }
+  $('smsg-edit').textContent='';
+  $('overlay-edit').classList.add('open');
+}
+
+function actualizarSubEdit(){
+  var cat=$('edit-cat').value;
+  var subs=SUBCATS[cat]||[];
+  var sel=$('edit-subcat');
+  sel.innerHTML='<option value="">-- General --</option>'+subs.map(function(s){
+    return'<option value="'+s+'">'+s+'</option>';
+  }).join('');
+}
+
+function cerrarEditar(){$('overlay-edit').classList.remove('open');}
+
+async function guardarEdicion(){
+  var id=$('edit-id').value;
+  var desc=$('edit-desc').value.trim();
+  var cat=$('edit-cat').value;
+  var sub=$('edit-subcat').value;
+  var monto=parseFloat($('edit-monto').value);
+  var fecha=$('edit-fecha').value;
+  var quien=$('edit-quien').value;
+  if(!desc||!monto||!fecha){$('smsg-edit').textContent='Completa todos los campos';$('smsg-edit').className='smsg err';return;}
+  var descFinal=sub?sub+' - '+desc:desc;
+  $('sbtn-edit').disabled=true;
+  var r=await db.from('gastos').update({
+    descripcion:descFinal, categoria:cat, monto:monto, fecha:fecha, quien:quien
+  }).eq('id',id);
+  if(r.error){
+    $('smsg-edit').textContent='Error: '+r.error.message;$('smsg-edit').className='smsg err';
+    $('sbtn-edit').disabled=false;
+  }else{
+    $('smsg-edit').textContent='Guardado correctamente';$('smsg-edit').className='smsg ok';
+    setTimeout(function(){cerrarEditar();load();},1000);
+  }
+}
+
 buildTabs();
 // Load budget for current month
 loadPptoMes(curM,curY);
