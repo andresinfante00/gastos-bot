@@ -37,6 +37,26 @@ const CATS = {
   otros:          { emoji: "📦", label: "Otros",           budget: 0       },
 };
 
+const SUBCATS = {
+  vivienda:       ["Arriendo","Hipotecario","Administración"],
+  mercado:        ["Mercado","Aseo","Otros"],
+  familia:        ["Cuidado JuanPa","Otros familia"],
+  transporte:     ["Gasolina","Uber/Taxi","Otros transporte"],
+  servicios:      ["Luz","Gas","Agua","Internet"],
+  celulares:      ["Celular Dani","Cel Jaiver"],
+  ocio:           ["Ocio general","Restaurante","Entretenimiento"],
+  personalJ:      ["Gastos personales J"],
+  personalD:      ["Gastos personales D"],
+  deudas:         ["Davivienda","Falabella","Impuesto casa/Dian"],
+  fondoCarro:     ["Fondo Carro"],
+  fondoImpuestos: ["Fondo Impuestos"],
+  samuel:         ["Samuel"],
+  jardinJuanpa:   ["Jardín JuanPa"],
+  zeus:           ["Zeús"],
+  imprevistos:    ["Imprevistos"],
+  otros:          [],
+};
+
 const INGRESOS_MENSUALES = 13848000;
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
@@ -54,14 +74,50 @@ const bar = (pct) => {
 const pendientes = {};
 const editando   = {};
 
+// ── PEDIR SUBCATEGORÍA ──────────────────────────────────────────────────────
+async function pedirSubcategoria(chatId, gasto) {
+  const subs = SUBCATS[gasto.category] || [];
+  const cat  = CATS[gasto.category];
+
+  // Sin subcategorías definidas → guardar directo
+  if (!subs.length) {
+    gasto.subcategoria = null;
+    const who = gasto._who || "Usuario";
+    delete pendientes[gasto._userId];
+    await guardarGasto(chatId, gasto, who);
+    return;
+  }
+
+  gasto.paso = "subcategoria";
+
+  let msg = `${cat.emoji} *${cat.label}* confirmado ✅
+
+`;
+  msg += `¿A qué subcategoría corresponde?
+
+`;
+  subs.forEach((s, i) => {
+    msg += `*${i + 1}.* ${s}
+`;
+  });
+  msg += `
+*0.* Sin subcategoría (omitir)`;
+
+  await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+}
+
 // ── GUARDAR GASTO EN SUPABASE ───────────────────────────────────────────────
 async function guardarGasto(chatId, gasto, who) {
   const cat = CATS[gasto.category] || CATS["otros"];
 
+  const descFinal = gasto.subcategoria
+    ? `${gasto.subcategoria} - ${gasto.description}`
+    : gasto.description;
+
   await supabase.from("gastos").insert({
     monto:       gasto.amount,
     categoria:   gasto.category,
-    descripcion: gasto.description,
+    descripcion: descFinal,
     quien:       who,
     fuente:      gasto.source,
     fecha:       gasto.fecha,
@@ -376,7 +432,11 @@ Mensaje: "${text}"`,
       category:    categoryId,
       description: resultado.description,
       source,
-      fecha: fechaHoy,
+      fecha:       fechaHoy,
+      subcategoria: null,
+      paso:        "categoria",
+      _userId:     userId,
+      _who:        who,
     };
 
     const listaCats = Object.entries(CATS)
