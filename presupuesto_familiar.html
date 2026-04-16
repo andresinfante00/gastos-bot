@@ -128,7 +128,7 @@ select option{background:var(--s2)}
       <span style="font-size:11px;color:var(--t3)" id="lu">Cargando...</span>
       <button class="rbtn" onclick="load()">&#8635; Actualizar</button>
       <button class="rbtn primary" onclick="openModal('overlay-gastos')">+ Gastos</button>
-      <button class="rbtn green" onclick="openModal('overlay-ingresos')">+ Ingresos</button>
+      <button class="rbtn green" onclick="abrirModalIngresos()">+ Ingresos</button>
       <button class="rbtn purple" onclick="abrirConfig()">&#9881; Editar</button>
     </div>
     <div class="tabs" id="tabs"></div>
@@ -180,7 +180,7 @@ select option{background:var(--s2)}
     </div>
     <div class="mp">
       <div class="ph"><span class="dot" style="background:var(--tl)"></span>Ingresos
-        <span style="margin-left:auto;font-size:10px;color:var(--tl);cursor:pointer" onclick="openModal('overlay-ingresos')">+ registrar</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--tl);cursor:pointer" onclick="abrirModalIngresos()">+ registrar</span>
       </div>
       <div id="ir-list"></div>
       <div class="mf" style="flex-direction:column;gap:3px">
