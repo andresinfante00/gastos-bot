@@ -8,10 +8,8 @@ const ANTHROPIC_KEY  = process.env.ANTHROPIC_KEY;
 const SUPABASE_URL   = process.env.SUPABASE_URL;
 const SUPABASE_KEY   = process.env.SUPABASE_KEY;
 
-// ID del grupo familiar — se llena automático cuando el bot recibe el primer mensaje del grupo
 let GROUP_CHAT_ID = null;
 
-// ── INICIALIZAR ────────────────────────────────────────────────────────────
 const bot      = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 const claude   = new Anthropic({ apiKey: ANTHROPIC_KEY });
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -31,9 +29,9 @@ const CATS = {
   fondoCarro:     { emoji: "🚗", label: "Fondo Carro",     budget: 500000  },
   fondoImpuestos: { emoji: "🏛️", label: "Fondo Impuestos", budget: 500000  },
   samuel:         { emoji: "👦", label: "Samuel",          budget: 500000  },
-  imprevistos:    { emoji: "🆘", label: "Imprevistos",      budget: 200000  },
-  jardinJuanpa:   { emoji: "🌿", label: "Jardín JuanPa",    budget: 1171000 },
-  zeus:           { emoji: "🐕", label: "Zeús",             budget: 400000  },
+  jardinJuanpa:   { emoji: "🌿", label: "Jardín JuanPa",   budget: 1171000 },
+  zeus:           { emoji: "🐕", label: "Zeús",            budget: 400000  },
+  imprevistos:    { emoji: "🆘", label: "Imprevistos",     budget: 200000  },
   otros:          { emoji: "📦", label: "Otros",           budget: 0       },
 };
 
@@ -60,17 +58,9 @@ const SUBCATS = {
 const INGRESOS_MENSUALES = 13848000;
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
-const fmt = (n) =>
-  new Intl.NumberFormat("es-CO", {
-    style: "currency", currency: "COP", minimumFractionDigits: 0,
-  }).format(n);
+const fmt = (n) => new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 0 }).format(n);
+const bar = (pct) => { const f = Math.min(Math.round(pct / 10), 10); return "▓".repeat(f) + "░".repeat(10 - f) + ` ${Math.round(pct)}%`; };
 
-const bar = (pct) => {
-  const f = Math.min(Math.round(pct / 10), 10);
-  return "▓".repeat(f) + "░".repeat(10 - f) + ` ${Math.round(pct)}%`;
-};
-
-// ── ESTADO TEMPORAL ────────────────────────────────────────────────────────
 const pendientes = {};
 const editando   = {};
 
@@ -79,8 +69,8 @@ async function pedirSubcategoria(chatId, gasto) {
   const subs = SUBCATS[gasto.category] || [];
   const cat  = CATS[gasto.category];
 
-  // Sin subcategorías definidas → guardar directo
   if (!subs.length) {
+    // Sin subcategorías → guardar directo
     gasto.subcategoria = null;
     const who = gasto._who || "Usuario";
     delete pendientes[gasto._userId];
@@ -90,23 +80,15 @@ async function pedirSubcategoria(chatId, gasto) {
 
   gasto.paso = "subcategoria";
 
-  let msg = `${cat.emoji} *${cat.label}* confirmado ✅
-
-`;
-  msg += `¿A qué subcategoría corresponde?
-
-`;
-  subs.forEach((s, i) => {
-    msg += `*${i + 1}.* ${s}
-`;
-  });
-  msg += `
-*0.* Sin subcategoría (omitir)`;
+  let msg = `${cat.emoji} *${cat.label}* confirmado ✅\n\n`;
+  msg += `¿A qué subcategoría corresponde?\n\n`;
+  subs.forEach((s, i) => { msg += `*${i + 1}.* ${s}\n`; });
+  msg += `\n*0.* Sin subcategoría (omitir)`;
 
   await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
 }
 
-// ── GUARDAR GASTO EN SUPABASE ───────────────────────────────────────────────
+// ── GUARDAR GASTO ───────────────────────────────────────────────────────────
 async function guardarGasto(chatId, gasto, who) {
   const cat = CATS[gasto.category] || CATS["otros"];
 
@@ -114,7 +96,7 @@ async function guardarGasto(chatId, gasto, who) {
     ? `${gasto.subcategoria} - ${gasto.description}`
     : gasto.description;
 
-  await supabase.from("gastos").insert({
+  const { error: insertError } = await supabase.from("gastos").insert({
     monto:       gasto.amount,
     categoria:   gasto.category,
     descripcion: descFinal,
@@ -123,38 +105,41 @@ async function guardarGasto(chatId, gasto, who) {
     fecha:       gasto.fecha,
   });
 
+  if (insertError) {
+    await bot.sendMessage(chatId, `❌ Error al guardar: ${insertError.message}`);
+    return;
+  }
+
+  // Calcular total del mes para esta categoría
   const fechaInicio = gasto.fecha.slice(0, 7) + "-01";
+  const fechaFin    = gasto.fecha.slice(0, 7) + "-31";
 
   const { data } = await supabase
     .from("gastos")
     .select("monto")
     .eq("categoria", gasto.category)
     .gte("fecha", fechaInicio)
-    .lte("fecha", gasto.fecha.slice(0, 7) + "-31");
+    .lte("fecha", fechaFin);
 
-  const totalMes = (data || []).reduce((s, r) => s + r.monto, 0);
-  const pct      = cat.budget > 0 ? (totalMes / cat.budget) * 100 : 0;
-  const status   = pct > 100 ? "⚠️ EXCEDIDO"
-                 : pct > 80  ? "⚡ Cuidado"
-                 : "✅";
-  const origen   = gasto.source === "applepay" ? `${who} (Apple Pay 💳)` : who;
+  const totalMes  = (data || []).reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
+  const pct       = cat.budget > 0 ? (totalMes / cat.budget) * 100 : 0;
+  const status    = pct > 100 ? "⚠️ EXCEDIDO" : pct > 80 ? "⚡ Cuidado" : "✅";
+  const origen    = gasto.source === "applepay" ? `${who} (Apple Pay 💳)` : who;
   const mesNombre = MESES[parseInt(gasto.fecha.slice(5, 7)) - 1];
   const restante  = cat.budget - totalMes;
 
   let mensaje = `${status} *${origen}* · ${cat.emoji} ${cat.label}\n`;
   mensaje += `*${fmt(gasto.amount)}* registrado\n`;
-  mensaje += `📝 ${gasto.description}\n`;
+  mensaje += `📝 ${descFinal}\n`;
   mensaje += `📅 ${mesNombre} ${gasto.fecha.slice(0, 4)}\n\n`;
 
   if (cat.budget > 0) {
     mensaje += `💰 Gastado este mes: *${fmt(totalMes)}*\n`;
     mensaje += `🎯 Presupuesto:      *${fmt(cat.budget)}*\n`;
-    if (restante >= 0) {
-      mensaje += `✅ Te quedan:        *${fmt(restante)}*\n`;
-    } else {
-      mensaje += `⚠️ Te pasaste:       *${fmt(Math.abs(restante))}*\n`;
-    }
-    mensaje += `${bar(pct)}`;
+    mensaje += restante >= 0
+      ? `✅ Te quedan:        *${fmt(restante)}*\n`
+      : `⚠️ Te pasaste:       *${fmt(Math.abs(restante))}*\n`;
+    mensaje += bar(pct);
   } else {
     mensaje += `📦 Gasto registrado en Otros`;
   }
@@ -169,20 +154,30 @@ async function enviarResumenMensual(chatId, anio, mes) {
   const fechaFin  = `${anio}-${mesStr}-31`;
   const mesNombre = MESES[mes - 1];
 
-  const { data } = await supabase
+  await bot.sendMessage(chatId, `🔄 Generando resumen de *${mesNombre} ${anio}*...`, { parse_mode: "Markdown" });
+
+  const { data, error } = await supabase
     .from("gastos")
     .select("monto, categoria")
     .gte("fecha", fechaIni)
     .lte("fecha", fechaFin);
 
-  if (!data || data.length === 0) return;
+  if (error) {
+    await bot.sendMessage(chatId, `❌ Error al consultar: ${error.message}`);
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    await bot.sendMessage(chatId, `📊 No hay gastos registrados en *${mesNombre} ${anio}*.`, { parse_mode: "Markdown" });
+    return;
+  }
 
   const totalesCat = {};
   data.forEach(g => {
-    totalesCat[g.categoria] = (totalesCat[g.categoria] || 0) + g.monto;
+    totalesCat[g.categoria] = (totalesCat[g.categoria] || 0) + (parseFloat(g.monto) || 0);
   });
 
-  const totalGastado = data.reduce((s, g) => s + g.monto, 0);
+  const totalGastado = data.reduce((s, g) => s + (parseFloat(g.monto) || 0), 0);
   const ahorro       = INGRESOS_MENSUALES - totalGastado;
 
   let msg = `📊 *Resumen ${mesNombre} ${anio}*\n`;
@@ -191,20 +186,24 @@ async function enviarResumenMensual(chatId, anio, mes) {
   Object.entries(CATS).forEach(([id, cat]) => {
     const gastado = totalesCat[id] || 0;
     if (gastado === 0 && cat.budget === 0) return;
+    if (gastado === 0 && cat.budget > 0) {
+      msg += `⬜ ${cat.emoji} ${cat.label}: ${fmt(0)} de ${fmt(cat.budget)} · 0%\n`;
+      return;
+    }
     const pct   = cat.budget > 0 ? Math.round((gastado / cat.budget) * 100) : 0;
     const icono = pct > 100 ? "⚠️" : pct > 80 ? "⚡" : "✅";
-    const linea = cat.budget > 0
-      ? `${icono} ${cat.emoji} ${cat.label}: ${fmt(gastado)} de ${fmt(cat.budget)} · ${pct}%`
-      : `📦 ${cat.emoji} ${cat.label}: ${fmt(gastado)}`;
-    msg += linea + "\n";
+    msg += cat.budget > 0
+      ? `${icono} ${cat.emoji} ${cat.label}: ${fmt(gastado)} / ${fmt(cat.budget)} · ${pct}%\n`
+      : `📦 ${cat.emoji} ${cat.label}: ${fmt(gastado)}\n`;
   });
 
   msg += `\n━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `💰 *Ingresos:* ${fmt(INGRESOS_MENSUALES)}\n`;
-  msg += `💸 *Gastado:* ${fmt(totalGastado)}\n`;
+  msg += `💰 *Ingresos:*  ${fmt(INGRESOS_MENSUALES)}\n`;
+  msg += `💸 *Gastado:*   ${fmt(totalGastado)}\n`;
+  msg += `📊 *Ejecución:* ${Math.round(totalGastado / INGRESOS_MENSUALES * 100)}%\n`;
   msg += ahorro >= 0
-    ? `💚 *Ahorro del mes:* ${fmt(ahorro)} 🎉`
-    : `🔴 *Déficit del mes:* ${fmt(Math.abs(ahorro))} ⚠️`;
+    ? `💚 *Ahorro:*     ${fmt(ahorro)} 🎉`
+    : `🔴 *Déficit:*    ${fmt(Math.abs(ahorro))} ⚠️`;
 
   await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
 }
@@ -217,9 +216,7 @@ function verificarFinDeMes() {
     const maniana = new Date(ahora);
     maniana.setDate(ahora.getDate() + 1);
     if (maniana.getDate() === 1 && ahora.getHours() === 20) {
-      const mes  = ahora.getMonth() + 1;
-      const anio = ahora.getFullYear();
-      await enviarResumenMensual(GROUP_CHAT_ID, anio, mes);
+      await enviarResumenMensual(GROUP_CHAT_ID, ahora.getFullYear(), ahora.getMonth() + 1);
     }
   }, 60 * 60 * 1000);
 }
@@ -235,12 +232,14 @@ bot.on("message", async (msg) => {
     GROUP_CHAT_ID = chatId;
   }
 
+  // ── COMANDOS ──────────────────────────────────────────────────────────────
   if (!text || text.startsWith("/")) {
     const cmd = text.split("@")[0].toLowerCase();
 
     if (cmd === "/resumen") {
       const ahora = new Date();
       await enviarResumenMensual(chatId, ahora.getFullYear(), ahora.getMonth() + 1);
+      return;
     }
 
     if (cmd === "/ultimos") {
@@ -248,101 +247,70 @@ bot.on("message", async (msg) => {
         .from("gastos")
         .select("id, monto, categoria, descripcion, quien, fecha")
         .order("created_at", { ascending: false })
-        .limit(5);
+        .limit(8);
 
       if (!data || data.length === 0) {
         await bot.sendMessage(chatId, "No hay gastos registrados aún.");
         return;
       }
 
-      let msg = "📋 *Últimos 5 gastos:*\n\n";
+      let m = "📋 *Últimos gastos:*\n\n";
       data.forEach((g, i) => {
         const cat = CATS[g.categoria] || CATS["otros"];
-        msg += `*${i + 1}.* ${cat.emoji} ${cat.label} — *${fmt(g.monto)}*\n`;
-        msg += `   📝 ${g.descripcion} · ${g.quien} · ${g.fecha}\n`;
-        msg += `   🆔 ID: \`${g.id}\`\n\n`;
+        m += `*${i + 1}.* ${cat.emoji} ${cat.label} — *${fmt(g.monto)}*\n`;
+        m += `   📝 ${g.descripcion} · ${g.quien} · ${g.fecha}\n`;
+        m += `   🆔 ID: \`${g.id}\`\n\n`;
       });
-      msg += "Para borrar: /borrar ID\nPara editar: /editar ID";
-      await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+      m += "Para borrar: /borrar ID\nPara editar: /editar ID";
+      await bot.sendMessage(chatId, m, { parse_mode: "Markdown" });
+      return;
     }
 
     if (cmd.startsWith("/borrar")) {
-      const id = text.split(" ")[1] || text.split("@")[0].split(" ")[1];
-      if (!id) {
-        await bot.sendMessage(chatId, "Indica el ID del gasto. Ejemplo: /borrar 42\nUsa /ultimos para ver los IDs.");
-        return;
-      }
+      const id = text.split(" ")[1];
+      if (!id) { await bot.sendMessage(chatId, "Indica el ID. Ejemplo: /borrar 42\nUsa /ultimos para ver IDs."); return; }
       const { error } = await supabase.from("gastos").delete().eq("id", id);
-      if (error) {
-        await bot.sendMessage(chatId, `Error al borrar: ${error.message}`);
-      } else {
-        await bot.sendMessage(chatId, `🗑️ Gasto ID ${id} borrado correctamente.`);
-      }
+      await bot.sendMessage(chatId, error ? `❌ Error: ${error.message}` : `🗑️ Gasto ${id} borrado.`);
+      return;
     }
 
     if (cmd.startsWith("/editar")) {
       const id = text.split(" ")[1];
-      if (!id) {
-        await bot.sendMessage(chatId, "Indica el ID del gasto. Ejemplo: /editar 42\nUsa /ultimos para ver los IDs.");
-        return;
-      }
+      if (!id) { await bot.sendMessage(chatId, "Indica el ID. Ejemplo: /editar 42\nUsa /ultimos para ver IDs."); return; }
       const { data } = await supabase.from("gastos").select("*").eq("id", id).single();
-      if (!data) {
-        await bot.sendMessage(chatId, `No encontré el gasto con ID ${id}.`);
-        return;
-      }
+      if (!data) { await bot.sendMessage(chatId, `No encontré el gasto con ID ${id}.`); return; }
       const cat = CATS[data.categoria] || CATS["otros"];
       editando[userId] = { id, gasto: data, paso: "elegir" };
-
-      const listaCats = Object.entries(CATS)
-        .map(([, c], i) => `${i + 1}. ${c.emoji} ${c.label}`)
-        .join("\n");
-
-      let msg = `✏️ *Editando gasto ID ${id}:*\n\n`;
-      msg += `${cat.emoji} ${cat.label} — *${fmt(data.monto)}*\n`;
-      msg += `📝 ${data.descripcion}\n\n`;
-      msg += `¿Qué quieres cambiar?\n*1.* El monto\n*2.* La categoría`;
-      await bot.sendMessage(chatId, msg, { parse_mode: "Markdown" });
+      let m = `✏️ *Editando gasto ID ${id}:*\n\n${cat.emoji} ${cat.label} — *${fmt(data.monto)}*\n📝 ${data.descripcion}\n\n¿Qué quieres cambiar?\n*1.* El monto\n*2.* La categoría`;
+      await bot.sendMessage(chatId, m, { parse_mode: "Markdown" });
+      return;
     }
 
     return;
   }
 
-  // ── Edición en curso ───────────────────────────────────────────────────────
+  // ── EDICIÓN EN CURSO ──────────────────────────────────────────────────────
   if (editando[userId]) {
     const estado = editando[userId];
 
     if (estado.paso === "elegir") {
-      if (text === "1") {
-        estado.paso = "nuevo_monto";
-        await bot.sendMessage(chatId, "¿Cuál es el nuevo monto? Escríbelo en pesos:");
-        return;
-      }
+      if (text === "1") { estado.paso = "nuevo_monto"; await bot.sendMessage(chatId, "¿Cuál es el nuevo monto?"); return; }
       if (text === "2") {
         estado.paso = "nueva_cat";
-        const listaCats = Object.entries(CATS)
-          .map(([, c], i) => `${i + 1}. ${c.emoji} ${c.label}`)
-          .join("\n");
-        await bot.sendMessage(chatId, `Elige la categoría correcta:\n\n${listaCats}`, { parse_mode: "Markdown" });
+        const lista = Object.entries(CATS).map(([, c], i) => `${i + 1}. ${c.emoji} ${c.label}`).join("\n");
+        await bot.sendMessage(chatId, `Elige la categoría correcta:\n\n${lista}`);
         return;
       }
-      await bot.sendMessage(chatId, "Responde *1* para cambiar el monto o *2* para cambiar la categoría.", { parse_mode: "Markdown" });
+      await bot.sendMessage(chatId, "Responde *1* para el monto o *2* para la categoría.", { parse_mode: "Markdown" });
       return;
     }
 
     if (estado.paso === "nuevo_monto") {
-      const nuevoMonto = parseInt(text.replace(/[^0-9]/g, ""));
-      if (isNaN(nuevoMonto) || nuevoMonto <= 0) {
-        await bot.sendMessage(chatId, "No entendí el monto. Escríbelo así: 45000");
-        return;
-      }
-      const { error } = await supabase.from("gastos").update({ monto: nuevoMonto }).eq("id", estado.id);
+      const v = parseInt(text.replace(/[^0-9]/g, ""));
+      if (isNaN(v) || v <= 0) { await bot.sendMessage(chatId, "Escribe el monto así: 45000"); return; }
+      const { error } = await supabase.from("gastos").update({ monto: v }).eq("id", estado.id);
       delete editando[userId];
-      if (error) {
-        await bot.sendMessage(chatId, `Error: ${error.message}`);
-      } else {
-        await bot.sendMessage(chatId, `✅ Monto actualizado a *${fmt(nuevoMonto)}*`, { parse_mode: "Markdown" });
-      }
+      await bot.sendMessage(chatId, error ? `❌ Error: ${error.message}` : `✅ Monto actualizado a *${fmt(v)}*`, { parse_mode: "Markdown" });
       return;
     }
 
@@ -353,54 +321,65 @@ bot.on("message", async (msg) => {
         const nuevaCat = catKeys[num - 1];
         const { error } = await supabase.from("gastos").update({ categoria: nuevaCat }).eq("id", estado.id);
         delete editando[userId];
-        if (error) {
-          await bot.sendMessage(chatId, `Error: ${error.message}`);
-        } else {
-          const cat = CATS[nuevaCat];
-          await bot.sendMessage(chatId, `✅ Categoría actualizada a ${cat.emoji} *${cat.label}*`, { parse_mode: "Markdown" });
-        }
+        const cat = CATS[nuevaCat];
+        await bot.sendMessage(chatId, error ? `❌ Error: ${error.message}` : `✅ Categoría: ${cat.emoji} *${cat.label}*`, { parse_mode: "Markdown" });
         return;
       }
-      await bot.sendMessage(chatId, "Escribe el número de la categoría de la lista.");
+      await bot.sendMessage(chatId, "Escribe el número de la categoría.");
       return;
     }
   }
 
-  // ── Confirmación de gasto pendiente ───────────────────────────────────────
+  // ── GASTO PENDIENTE (confirmación categoría + subcategoría) ───────────────
   if (pendientes[userId]) {
     const gasto   = pendientes[userId];
     const catKeys = Object.keys(CATS);
     const num     = parseInt(text);
 
-    if (text === "✅" || text.toLowerCase() === "si" || text.toLowerCase() === "sí") {
-      delete pendientes[userId];
-      await guardarGasto(chatId, gasto, who);
+    // PASO 1: confirmar o cambiar categoría
+    if (gasto.paso === "categoria") {
+      if (text === "✅" || text.toLowerCase() === "si" || text.toLowerCase() === "sí") {
+        await pedirSubcategoria(chatId, gasto);
+        return;
+      }
+      if (!isNaN(num) && num >= 1 && num <= catKeys.length) {
+        gasto.category = catKeys[num - 1];
+        await pedirSubcategoria(chatId, gasto);
+        return;
+      }
+      await bot.sendMessage(chatId, "Responde ✅ para confirmar o el número de la categoría 👆", { parse_mode: "Markdown" });
       return;
     }
 
-    if (!isNaN(num) && num >= 1 && num <= catKeys.length) {
-      gasto.category = catKeys[num - 1];
-      delete pendientes[userId];
-      await guardarGasto(chatId, gasto, who);
+    // PASO 2: elegir subcategoría
+    if (gasto.paso === "subcategoria") {
+      const subs = SUBCATS[gasto.category] || [];
+      if (text === "0" || text.toLowerCase() === "ninguna" || text.toLowerCase() === "no") {
+        gasto.subcategoria = null;
+        delete pendientes[userId];
+        await guardarGasto(chatId, gasto, who);
+        return;
+      }
+      if (!isNaN(num) && num >= 1 && num <= subs.length) {
+        gasto.subcategoria = subs[num - 1];
+        delete pendientes[userId];
+        await guardarGasto(chatId, gasto, who);
+        return;
+      }
+      await bot.sendMessage(chatId, `Escribe el número de la subcategoría o *0* para omitir 👆`, { parse_mode: "Markdown" });
       return;
     }
 
-    await bot.sendMessage(chatId,
-      "Responde con ✅ para confirmar o escribe el número de la categoría correcta 👆",
-      { parse_mode: "Markdown" }
-    );
     return;
   }
 
-  // ── Procesar nuevo gasto ──────────────────────────────────────────────────
+  // ── NUEVO GASTO ───────────────────────────────────────────────────────────
   const isApplePay = text.startsWith("💳 Apple Pay");
   const source     = isApplePay ? "applepay" : "telegram";
   const fechaHoy   = new Date().toISOString().split("T")[0];
 
   try {
-    const catList = Object.entries(CATS)
-      .map(([id, c], i) => `${i + 1}. ${c.emoji} ${c.label}`)
-      .join(", ");
+    const catList = Object.entries(CATS).map(([id, c], i) => `${i + 1}. ${c.emoji} ${c.label}`).join(", ");
 
     const ai = await claude.messages.create({
       model: "claude-haiku-4-5-20251001",
@@ -411,19 +390,24 @@ bot.on("message", async (msg) => {
 Extrae del mensaje:
 1. Monto en pesos (soporta "45mil", "45.000", "$45000", "cuarenta y cinco mil")
 2. La categoría MÁS apropiada de esta lista: ${catList}
-3. Descripción corta y específica del gasto (máximo 40 caracteres)
+3. Descripción corta del gasto (máximo 40 caracteres)
 
 Responde SOLO con JSON sin markdown:
 {"amount": número, "category": "id_categoria", "description": "descripción"}
 
-Los IDs de categoría son exactamente: ${Object.keys(CATS).join(", ")}
-
+IDs válidos: ${Object.keys(CATS).join(", ")}
 Mensaje: "${text}"`,
       }],
     });
 
-    const rawText    = ai.content[0].text.trim().replace(/```json|```/g, "").trim();
-    const resultado  = JSON.parse(rawText);
+    const rawText   = ai.content[0].text.trim().replace(/```json|```/g, "").trim();
+    const resultado = JSON.parse(rawText);
+
+    if (!resultado.amount || resultado.amount <= 0) {
+      await bot.sendMessage(chatId, "No detecté el monto 😅\nEscribe así: _\"45000 mercado\"_ o _\"Taxi 12000\"_", { parse_mode: "Markdown" });
+      return;
+    }
+
     const categoryId = Object.keys(CATS).includes(resultado.category) ? resultado.category : "otros";
     const cat        = CATS[categoryId];
 
@@ -439,9 +423,7 @@ Mensaje: "${text}"`,
       _who:        who,
     };
 
-    const listaCats = Object.entries(CATS)
-      .map(([, c], i) => `${i + 1}. ${c.emoji} ${c.label}`)
-      .join("\n");
+    const listaCats = Object.entries(CATS).map(([, c], i) => `${i + 1}. ${c.emoji} ${c.label}`).join("\n");
 
     const confirmMsg =
       `🤖 Detecté este gasto:\n\n` +
@@ -450,7 +432,7 @@ Mensaje: "${text}"`,
       `📝 ${resultado.description}\n\n` +
       `¿Es correcta la categoría?\n` +
       `Responde *✅* para confirmar o el *número* para cambiarla:\n\n` +
-      `${listaCats}`;
+      listaCats;
 
     await bot.sendMessage(chatId, confirmMsg, { parse_mode: "Markdown" });
 
@@ -464,41 +446,27 @@ Mensaje: "${text}"`,
   }
 });
 
-// ── SERVIDOR HTTP + AUTO-PING RENDER ─────────────────────────────────────────
+// ── HTTP + PINGS ──────────────────────────────────────────────────────────
 const http  = require("http");
 const https = require("https");
 const PORT  = process.env.PORT || 3000;
 
-http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end("GastosBot corriendo OK");
-}).listen(PORT, () => {
-  console.log("🌐 Servidor HTTP escuchando en puerto " + PORT);
+http.createServer((req, res) => { res.writeHead(200); res.end("GastosBot OK"); }).listen(PORT, () => {
+  console.log("🌐 Puerto " + PORT);
 });
 
 const BOT_URL = process.env.RENDER_EXTERNAL_URL || "https://gastos-bot-csuv.onrender.com";
 setInterval(() => {
-  https.get(BOT_URL, (res) => {
-    console.log(`🏓 Auto-ping Render OK — ${new Date().toLocaleTimeString("es-CO")}`);
-  }).on("error", (err) => {
-    console.log("⚠️ Auto-ping Render error:", err.message);
-  });
+  https.get(BOT_URL, () => console.log(`🏓 Render ping OK — ${new Date().toLocaleTimeString("es-CO")}`))
+       .on("error", (e) => console.log("⚠️ Render ping:", e.message));
 }, 3 * 60 * 1000);
 
-// ── PING A SUPABASE (evita que se pause el proyecto gratuito) ────────────────
-// Supabase pausa proyectos sin actividad por 7 días. Este ping lo mantiene activo.
 setInterval(async () => {
   try {
     await supabase.from("gastos").select("id").limit(1);
     console.log(`💾 Supabase ping OK — ${new Date().toLocaleTimeString("es-CO")}`);
-  } catch (e) {
-    console.log("⚠️ Supabase ping error:", e.message);
-  }
-}, 1000 * 60 * 60 * 24 * 3); // cada 3 días
+  } catch (e) { console.log("⚠️ Supabase ping:", e.message); }
+}, 1000 * 60 * 60 * 24 * 3);
 
-// ── ARRANCAR ──────────────────────────────────────────────────────────────────
 verificarFinDeMes();
-console.log("🤖 GastosBot corriendo...");
-console.log("📅 Resumen automático activado — se envía el último día del mes a las 8pm");
-console.log("📊 Escribe /resumen en el grupo para ver el resumen en cualquier momento");
-console.log("💾 Ping a Supabase activo — proyecto no se pausará");
+console.log("🤖 GastosBot corriendo — versión con subcategorías y resumen mejorado");
