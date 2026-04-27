@@ -121,7 +121,8 @@ async function guardarGasto(chatId, gasto, who) {
   if (error) { await bot.sendMessage(chatId, `❌ Error al guardar: ${error.message}`); return; }
 
   const fechaInicio = gasto.fecha.slice(0, 7) + "-01";
-  const fechaFin    = gasto.fecha.slice(0, 7) + "-31";
+  const [fy, fm] = gasto.fecha.split('-').map(Number);
+  const fechaFin = new Date(fy, fm, 0).toISOString().split('T')[0];
   const { data }    = await supabase.from("gastos").select("monto").eq("categoria", gasto.category).gte("fecha", fechaInicio).lte("fecha", fechaFin);
 
   const totalMes = (data || []).reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
@@ -152,7 +153,7 @@ async function enviarResumenMensual(chatId, anio, mes) {
   await bot.sendMessage(chatId, `🔄 Generando resumen de *${mesNombre} ${anio}*...`, { parse_mode: "Markdown" });
 
   const { data, error } = await supabase.from("gastos").select("monto, categoria")
-    .gte("fecha", `${anio}-${mesStr}-01`).lte("fecha", `${anio}-${mesStr}-31`);
+    .gte("fecha", `${anio}-${mesStr}-01`).lte("fecha", new Date(anio, mes, 0).toISOString().split('T')[0]);
 
   if (error) { await bot.sendMessage(chatId, `❌ Error: ${error.message}`); return; }
   if (!data || data.length === 0) {
