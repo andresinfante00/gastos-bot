@@ -432,7 +432,7 @@ select option{background:var(--s2)}
 // ============================================================
 // CONFIGURACIÓN — Google Apps Script URL
 // ============================================================
-var SCRIPT_URL = localStorage.getItem('gastos_script_url') || '';
+var SCRIPT_URL = localStorage.getItem('gastos_script_url') || 'https://script.google.com/macros/s/AKfycbyew4kBK3mO-hBv80o6x8_WTxxVp9wyntXneg6K-Te1fLNuq_kn2C3nOvDZuFlNrG1L/exec';
 
 // ---- Presupuestos por defecto ----
 var CATS = {
@@ -519,17 +519,18 @@ var expanded = {}, visRows = [];
 // ============================================================
 async function apiGet(params) {
   if (!SCRIPT_URL) throw new Error('Sin URL configurada');
-  const qs = Object.entries(params).map(([k,v])=>k+'='+encodeURIComponent(v)).join('&');
+  const qs = Object.entries(params).map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&');
   const r = await fetch(SCRIPT_URL + '?' + qs);
   return r.json();
 }
 
+// Todas las escrituras usan GET para evitar bloqueo CORS desde GitHub Pages
 async function apiPost(body) {
   if (!SCRIPT_URL) throw new Error('Sin URL configurada');
-  const r = await fetch(SCRIPT_URL, {
-    method: 'POST',
-    body: JSON.stringify(body)
-  });
+  var params = 'action=' + body.action + '&sheet=' + (body.sheet || '');
+  if (body.id)   params += '&id='   + encodeURIComponent(body.id);
+  if (body.data) params += '&data=' + encodeURIComponent(JSON.stringify(body.data));
+  const r = await fetch(SCRIPT_URL + '?' + params);
   return r.json();
 }
 
