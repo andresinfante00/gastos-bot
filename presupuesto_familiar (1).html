@@ -432,7 +432,7 @@ select option{background:var(--s2)}
 // ============================================================
 // CONFIGURACIÓN — Google Apps Script URL
 // ============================================================
-var SCRIPT_URL = localStorage.getItem('gastos_script_url') || 'https://script.google.com/macros/s/AKfycbyew4kBK3mO-hBv80o6x8_WTxxVp9wyntXneg6K-Te1fLNuq_kn2C3nOvDZuFlNrG1L/exec';
+var SCRIPT_URL = localStorage.getItem('gastos_script_url') || 'https://script.google.com/macros/s/AKfycbzzjE-L2kvfauL0zF774yAjzIhYjfkZZrRsecEcVG4J0tp-CYEOGOSER4F5wSvb86Qj/exec';
 
 // ---- Presupuestos por defecto ----
 var CATS = {
@@ -524,14 +524,49 @@ async function apiGet(params) {
   return r.json();
 }
 
-// Todas las escrituras usan GET para evitar bloqueo CORS desde GitHub Pages
+// JSONP — evita CORS completamente desde GitHub Pages
+function apiCall(params) {
+  return new Promise(function(resolve, reject) {
+    var cbName = 'cb_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    var timeout = setTimeout(function() {
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+      reject(new Error('Timeout al conectar con Google Sheets'));
+    }, 15000);
+
+    window[cbName] = function(data) {
+      clearTimeout(timeout);
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+      resolve(data);
+    };
+
+    var qs = Object.entries(params).map(function(e) {
+      return e[0] + '=' + encodeURIComponent(e[1]);
+    }).join('&');
+
+    var script = document.createElement('script');
+    script.src = SCRIPT_URL + '?' + qs + '&callback=' + cbName;
+    script.onerror = function() {
+      clearTimeout(timeout);
+      delete window[cbName];
+      reject(new Error('Error al cargar el script'));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+async function apiGet(params) {
+  if (!SCRIPT_URL) throw new Error('Sin URL configurada');
+  return apiCall(params);
+}
+
 async function apiPost(body) {
   if (!SCRIPT_URL) throw new Error('Sin URL configurada');
-  var params = 'action=' + body.action + '&sheet=' + (body.sheet || '');
-  if (body.id)   params += '&id='   + encodeURIComponent(body.id);
-  if (body.data) params += '&data=' + encodeURIComponent(JSON.stringify(body.data));
-  const r = await fetch(SCRIPT_URL + '?' + params);
-  return r.json();
+  var params = { action: body.action, sheet: body.sheet || '' };
+  if (body.id)   params.id   = body.id;
+  if (body.data) params.data = JSON.stringify(body.data);
+  return apiCall(params);
 }
 
 // ============================================================
