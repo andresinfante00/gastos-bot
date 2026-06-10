@@ -13,7 +13,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
 const BOT_TOKEN  = process.env.BOT_TOKEN;
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzzjE-L2kvfauL0zF774yAjzIhYjfkZZrRsecEcVG4J0tp-CYEOGOSER4F5wSvb86Qj/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxlONYrkWCpr6HRHSNldmx3n2qGVcMzdqRNLX8yrvQKl15402fTiqxhgs0qI43ea5jgxA/exec';
 
 if (!BOT_TOKEN) {
   console.error('❌ Falta BOT_TOKEN en el .env');
